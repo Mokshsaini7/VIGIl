@@ -56,6 +56,15 @@ def root():
     }
 
 
+@app.get("/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "service": "VIGIL Backend",
+        "version": "1.0.0"
+    }
+
+
 # Mount REST and WebSocket Routers
 app.include_router(api_router, prefix="/api")
 app.include_router(ws_router)
