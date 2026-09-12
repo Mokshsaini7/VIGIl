@@ -24,7 +24,7 @@ export const AnalyzeView: React.FC = () => {
       formData.append('file', file);
       formData.append('speaker_id', 'SPK_001');
 
-      const response = await fetch('http://localhost:8000/api/audio/analyze', {
+      const response = await fetch('http://https://vigil-backend-bbwj.onrender.com/api/audio/analyze', {
         method: 'POST',
         body: formData
       });

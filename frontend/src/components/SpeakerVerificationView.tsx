@@ -13,7 +13,7 @@ export const SpeakerVerificationView: React.FC = () => {
 
   const fetchProfiles = async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/speaker/profiles');
+      const res = await fetch('http://https://vigil-backend-bbwj.onrender.com/api/speaker/profiles');
       if (res.ok) {
         const data = await res.json();
         setProfiles(data);
@@ -43,7 +43,7 @@ export const SpeakerVerificationView: React.FC = () => {
       formData.append('name', name);
       formData.append('files', sampleBlob, 'sample1.wav');
 
-      const res = await fetch('http://localhost:8000/api/speaker/register', {
+      const res = await fetch('http://https://vigil-backend-bbwj.onrender.com/api/speaker/register', {
         method: 'POST',
         body: formData
       });

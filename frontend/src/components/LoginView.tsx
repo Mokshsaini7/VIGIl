@@ -29,7 +29,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, onSwitchTo
       formData.append('username', username);
       formData.append('password', password);
 
-      const res = await fetch('http://localhost:8000/api/auth/login', {
+      const res = await fetch('http://https://vigil-backend-bbwj.onrender.com/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: formData.toString()

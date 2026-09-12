@@ -57,7 +57,7 @@ export const DemoModeView: React.FC = () => {
     setSimulating(true);
 
     try {
-      const response = await fetch(`http://localhost:8000/api/demo/simulate/${scenarioId}`, {
+      const response = await fetch(`http://https://vigil-backend-bbwj.onrender.com/api/demo/simulate/${scenarioId}`, {
         method: 'POST'
       });
 
