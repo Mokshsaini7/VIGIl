@@ -2,7 +2,8 @@
 VIGIL — FastAPI Main Application Entrypoint
 Integrates REST Endpoints, WebSockets, CORS, Database Table Auto-creation, and Clean Startup.
 """
-
+from sqlalchemy import text
+from app.db.database import SessionLocal
 import sys
 import os
 
@@ -32,9 +33,9 @@ app = FastAPI(
 
 # CORS configuration
 origins = [
+    "https://vigil-alpha-inky.vercel.app",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "*"
 ]
 
 app.add_middleware(
@@ -68,3 +69,21 @@ def health_check():
 # Mount REST and WebSocket Routers
 app.include_router(api_router, prefix="/api")
 app.include_router(ws_router)
+@app.get("/health/db")
+def database_health():
+    try:
+        db = SessionLocal()
+        db.execute(text("SELECT 1"))
+        db.close()
+
+        return {
+            "status": "healthy",
+            "database": "connected"
+        }
+
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "database": "disconnected",
+            "error": str(e)
+        }
