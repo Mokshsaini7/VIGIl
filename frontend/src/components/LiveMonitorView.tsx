@@ -19,108 +19,82 @@ import {
   Tooltip,
 } from 'recharts';
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ||
-  'https://vigil-backend-bbwj.onrender.com';
-
-const WS_BASE = API_BASE.replace(/^http/, 'ws');
-
-interface TranscriptUtterance {
+type TranscriptUtterance = {
   id: number;
   speaker: string;
   text: string;
   flags?: string[];
-}
+};
 
-interface TimelinePoint {
+type TimelinePoint = {
   time: string;
   score: number;
-}
+};
 
-interface SpeakerProfile {
-  speaker_id: string;
-  name: string;
-}
-
-interface AnalysisMessage {
+type AnalysisMessage = {
   type?: string;
   session_id?: string;
-
+  timestamp?: string;
   transcript?: string;
 
   voice_analysis?: {
     synthetic_probability?: number;
+    real_probability?: number;
     voice_status?: string;
     confidence?: number;
+    acoustic_features?: Record<string, number>;
   };
 
   speaker_analysis?: {
     speaker_match?: number | null;
     status?: string;
+    verified?: boolean | null;
+    confidence?: number;
+    speaker_id?: string | null;
+    speaker_name?: string | null;
   };
 
   context_analysis?: {
     context_risk?: number;
+    social_engineering_score?: number;
     risk_factors?: string[];
     detected_categories?: string[];
+    impersonation_context?: string;
+    urgency_score?: number;
+    secrecy_score?: number;
   };
 
   risk?: {
     score?: number;
     threat_level?: string;
+    contributing_factors?: string[];
+  };
+
+  threat?: {
+    categories?: string[];
+    primary_threat?: string;
     recommendation?: string;
+    action_code?: string;
+    requires_immediate_action?: boolean;
   };
-}
 
-interface BrowserSpeechRecognitionEvent {
-  results: {
-    length: number;
-    [index: number]: {
-      isFinal: boolean;
-      [index: number]: {
-        transcript: string;
-      };
-    };
+  audio?: {
+    duration?: number;
+    rms_energy?: number;
   };
-}
-
-interface BrowserSpeechRecognitionErrorEvent {
-  error: string;
-  message?: string;
-}
-
-interface BrowserSpeechRecognition {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
-
-  onstart: (() => void) | null;
-  onend: (() => void) | null;
-  onerror: ((event: BrowserSpeechRecognitionErrorEvent) => void) | null;
-  onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null;
-}
-
-interface BrowserSpeechRecognitionConstructor {
-  new (): BrowserSpeechRecognition;
-}
-
-declare global {
-  interface Window {
-    SpeechRecognition?: BrowserSpeechRecognitionConstructor;
-    webkitSpeechRecognition?: BrowserSpeechRecognitionConstructor;
-  }
-}
+};
 
 export const LiveMonitorView: React.FC = () => {
+  // =========================================================
+  // UI STATE
+  // =========================================================
+
   const [isRecording, setIsRecording] = useState(false);
 
   const [duration, setDuration] = useState(0);
 
   const [riskScore, setRiskScore] = useState(0);
+
   const [riskLevel, setRiskLevel] = useState('LOW');
 
   const [synthProb, setSynthProb] = useState(0);
@@ -129,83 +103,76 @@ export const LiveMonitorView: React.FC = () => {
     useState<number | null>(null);
 
   const [speakerStatus, setSpeakerStatus] =
-    useState('NOT ENROLLED');
+    useState('NOT_ENROLLED');
 
   const [impersonation, setImpersonation] =
     useState('NONE');
 
   const [speakerProfiles, setSpeakerProfiles] =
-    useState<SpeakerProfile[]>([]);
+    useState<any[]>([]);
 
   const [selectedSpeakerId, setSelectedSpeakerId] =
-    useState('');
+    useState<string>('');
 
   const [transcriptUtterances, setTranscriptUtterances] =
     useState<TranscriptUtterance[]>([]);
 
   const [timelineData, setTimelineData] =
-    useState<TimelinePoint[]>([
-      {
-        time: '00:00',
-        score: 0,
-      },
-    ]);
+    useState<TimelinePoint[]>([]);
 
-  const [recommendation, setRecommendation] =
-    useState(
-      'Start the microphone monitor to begin real-time voice security analysis.'
-    );
-
-  const [connectionStatus, setConnectionStatus] =
-    useState('OFFLINE');
-
-  const [speechStatus, setSpeechStatus] =
-    useState('STANDBY');
-
-  const [microphoneStatus, setMicrophoneStatus] =
-    useState('OFF');
-
-  const mediaStreamRef =
-    useRef<MediaStream | null>(null);
-
-  const mediaRecorderRef =
-    useRef<MediaRecorder | null>(null);
+  // =========================================================
+  // REAL-TIME AUDIO / WEBSOCKET REFS
+  // =========================================================
 
   const websocketRef =
     useRef<WebSocket | null>(null);
 
-  const recognitionRef =
-    useRef<BrowserSpeechRecognition | null>(null);
+  const audioContextRef =
+    useRef<AudioContext | null>(null);
 
-  const durationIntervalRef =
-    useRef<ReturnType<typeof setInterval> | null>(null);
+  const mediaStreamRef =
+    useRef<MediaStream | null>(null);
 
-  const transcriptIdRef =
-    useRef(0);
+  const audioSourceRef =
+    useRef<MediaStreamAudioSourceNode | null>(null);
 
-  const finalTranscriptRef =
+  const processorRef =
+    useRef<ScriptProcessorNode | null>(null);
+
+  const speechRecognitionRef =
+    useRef<any>(null);
+
+  const isRecordingRef =
+    useRef(false);
+
+  const transcriptRef =
     useRef('');
 
-  const recordingStartRef =
-    useRef<number | null>(null);
+  const utteranceIdRef =
+    useRef(0);
 
-  const shouldRestartRecognitionRef =
-    useRef(false);
+  const lastTranscriptRef =
+    useRef('');
 
-  const wsConnectedRef =
-    useRef(false);
+  // =========================================================
+  // BACKEND URL
+  // =========================================================
 
-  /*
-   * ---------------------------------------------------------
-   * FETCH SPEAKER PROFILES
-   * ---------------------------------------------------------
-   */
+  const BACKEND_HTTP_URL =
+    'https://vigil-backend-bbwj.onrender.com';
+
+  const BACKEND_WS_URL =
+    'wss://vigil-backend-bbwj.onrender.com/ws/live-monitor';
+
+  // =========================================================
+  // FETCH SPEAKER PROFILES
+  // =========================================================
 
   useEffect(() => {
-    const fetchSpeakerProfiles = async () => {
+    const loadSpeakerProfiles = async () => {
       try {
         const response = await fetch(
-          `${API_BASE}/api/speaker/profiles`
+          `${BACKEND_HTTP_URL}/api/speaker/profiles`
         );
 
         if (!response.ok) {
@@ -226,67 +193,118 @@ export const LiveMonitorView: React.FC = () => {
           }
         }
       } catch (error) {
-        console.error(
-          'Failed to fetch speaker profiles:',
+        console.warn(
+          '[VIGIL] Could not load speaker profiles:',
           error
         );
 
         setSpeakerProfiles([]);
-        setSelectedSpeakerId('');
       }
     };
 
-    fetchSpeakerProfiles();
+    loadSpeakerProfiles();
+  }, []);
 
+  // =========================================================
+  // CLEANUP ON PAGE UNMOUNT
+  // =========================================================
+
+  useEffect(() => {
     return () => {
-      stopEverything();
+      stopAllMonitoring();
     };
   }, []);
 
-  /*
-   * ---------------------------------------------------------
-   * TIMER
-   * ---------------------------------------------------------
-   */
+  // =========================================================
+  // TIMER
+  // =========================================================
 
-  const startTimer = () => {
-    if (durationIntervalRef.current) {
-      clearInterval(durationIntervalRef.current);
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null =
+      null;
+
+    if (isRecording) {
+      timer = setInterval(() => {
+        setDuration((previous) => previous + 1);
+      }, 1000);
     }
 
-    recordingStartRef.current = Date.now();
+    return () => {
+      if (timer) {
+        clearInterval(timer);
+      }
+    };
+  }, [isRecording]);
 
-    durationIntervalRef.current =
-      setInterval(() => {
-        if (!recordingStartRef.current) {
-          return;
-        }
+  // =========================================================
+  // PCM FLOAT32 → PCM16 BASE64
+  // =========================================================
 
-        const elapsed = Math.floor(
-          (Date.now() -
-            recordingStartRef.current) /
-            1000
+  const float32ToPCM16Base64 = (
+    input: Float32Array
+  ): string => {
+    const buffer = new ArrayBuffer(
+      input.length * 2
+    );
+
+    const view = new DataView(buffer);
+
+    for (let i = 0; i < input.length; i++) {
+      const sample = Math.max(
+        -1,
+        Math.min(1, input[i])
+      );
+
+      const int16 =
+        sample < 0
+          ? sample * 0x8000
+          : sample * 0x7fff;
+
+      view.setInt16(
+        i * 2,
+        int16,
+        true
+      );
+    }
+
+    const bytes =
+      new Uint8Array(buffer);
+
+    let binary = '';
+
+    const chunkSize = 8192;
+
+    for (
+      let i = 0;
+      i < bytes.length;
+      i += chunkSize
+    ) {
+      const end = Math.min(
+        i + chunkSize,
+        bytes.length
+      );
+
+      for (
+        let j = i;
+        j < end;
+        j++
+      ) {
+        binary += String.fromCharCode(
+          bytes[j]
         );
-
-        setDuration(elapsed);
-      }, 500);
-  };
-
-  const stopTimer = () => {
-    if (durationIntervalRef.current) {
-      clearInterval(durationIntervalRef.current);
-      durationIntervalRef.current = null;
+      }
     }
+
+    return btoa(binary);
   };
 
-  /*
-   * ---------------------------------------------------------
-   * FORMAT TIME
-   * ---------------------------------------------------------
-   */
+  // =========================================================
+  // FORMAT TIME
+  // =========================================================
 
   const formatTime = (secs: number) => {
     const mins = Math.floor(secs / 60);
+
     const remainder = secs % 60;
 
     return `${mins < 10 ? '0' : ''}${mins}:${
@@ -294,951 +312,793 @@ export const LiveMonitorView: React.FC = () => {
     }${remainder}`;
   };
 
-  /*
-   * ---------------------------------------------------------
-   * RESET ANALYSIS
-   * ---------------------------------------------------------
-   */
-
-  const resetAnalysis = () => {
-    setDuration(0);
-
-    setRiskScore(0);
-    setRiskLevel('LOW');
-
-    setSynthProb(0);
-
-    setSpeakerSimilarity(null);
-    setSpeakerStatus(
-      speakerProfiles.length > 0
-        ? 'READY'
-        : 'NOT ENROLLED'
-    );
-
-    setImpersonation('NONE');
-
-    setRecommendation(
-      'Listening for speech and security signals...'
-    );
-
-    setTranscriptUtterances([]);
-
-    setTimelineData([
-      {
-        time: '00:00',
-        score: 0,
-      },
-    ]);
-
-    finalTranscriptRef.current = '';
-    transcriptIdRef.current = 0;
-  };
-
-  /*
-   * ---------------------------------------------------------
-   * SEND JSON THROUGH WEBSOCKET
-   * ---------------------------------------------------------
-   */
-
-  const sendWebSocketMessage = (
-    payload: Record<string, unknown>
-  ) => {
-    const socket = websocketRef.current;
-
-    if (
-      !socket ||
-      socket.readyState !== WebSocket.OPEN
-    ) {
-      return false;
-    }
-
-    try {
-      socket.send(JSON.stringify(payload));
-      return true;
-    } catch (error) {
-      console.error(
-        'WebSocket send failed:',
-        error
-      );
-
-      return false;
-    }
-  };
-
-  /*
-   * ---------------------------------------------------------
-   * PROCESS BACKEND ANALYSIS
-   * ---------------------------------------------------------
-   */
+  // =========================================================
+  // PROCESS BACKEND ANALYSIS
+  // =========================================================
 
   const processAnalysisMessage = (
     message: AnalysisMessage
   ) => {
-    /*
-     * VOICE AUTHENTICITY
-     */
-
-    const syntheticProbability =
-      message.voice_analysis
-        ?.synthetic_probability;
-
     if (
-      typeof syntheticProbability ===
-      'number'
+      message.type !== 'analysis_update'
     ) {
-      const normalized =
-        Math.max(
-          0,
-          Math.min(1, syntheticProbability)
-        );
-
-      setSynthProb(normalized);
+      return;
     }
 
-    /*
-     * SPEAKER VERIFICATION
-     */
+    // -------------------------------------------------------
+    // RISK
+    // -------------------------------------------------------
+
+    const newRiskScore =
+      Number(
+        message.risk?.score ?? 0
+      );
+
+    const newRiskLevel =
+      message.risk?.threat_level ||
+      'LOW';
+
+    setRiskScore(
+      Math.max(
+        0,
+        Math.min(
+          100,
+          newRiskScore
+        )
+      )
+    );
+
+    setRiskLevel(
+      newRiskLevel
+    );
+
+    // -------------------------------------------------------
+    // VOICE AUTHENTICITY
+    // -------------------------------------------------------
+
+    const syntheticProbability =
+      Number(
+        message.voice_analysis
+          ?.synthetic_probability ?? 0
+      );
+
+    setSynthProb(
+      Math.max(
+        0,
+        Math.min(
+          1,
+          syntheticProbability
+        )
+      )
+    );
+
+    // -------------------------------------------------------
+    // SPEAKER VERIFICATION
+    // -------------------------------------------------------
+
+    const speaker =
+      message.speaker_analysis;
 
     const speakerMatch =
-      message.speaker_analysis
-        ?.speaker_match;
+      speaker?.speaker_match;
 
     if (
-      typeof speakerMatch === 'number'
+      speakerMatch !== null &&
+      speakerMatch !== undefined &&
+      Number.isFinite(
+        Number(speakerMatch)
+      )
     ) {
-      const normalized =
-        Math.max(
-          0,
-          Math.min(1, speakerMatch)
-        );
-
-      setSpeakerSimilarity(normalized);
-    } else if (
-      speakerMatch === null
-    ) {
+      setSpeakerSimilarity(
+        Number(speakerMatch)
+      );
+    } else {
       setSpeakerSimilarity(null);
     }
 
-    const backendSpeakerStatus =
-      message.speaker_analysis?.status;
-
-    if (backendSpeakerStatus) {
-      setSpeakerStatus(
-        backendSpeakerStatus.toUpperCase()
-      );
-    }
-
-    /*
-     * CONTEXT / IMPERSONATION
-     */
-
-    const categories =
-      message.context_analysis
-        ?.detected_categories || [];
-
-    const riskFactors =
-      message.context_analysis
-        ?.risk_factors || [];
-
-    if (categories.length > 0) {
-      setImpersonation(
-        categories
-          .join(' / ')
-          .toUpperCase()
-      );
-    } else if (
-      riskFactors.length > 0
-    ) {
-      setImpersonation(
-        riskFactors[0].toUpperCase()
-      );
-    } else {
-      setImpersonation('NONE');
-    }
-
-    /*
-     * RISK ENGINE
-     */
-
-    const score =
-      message.risk?.score;
-
-    if (typeof score === 'number') {
-      const safeScore = Math.max(
-        0,
-        Math.min(100, score)
-      );
-
-      setRiskScore(safeScore);
-
-      const now = new Date();
-
-      const mins = String(
-        Math.floor(
-          (now.getTime() -
-            (recordingStartRef.current ||
-              now.getTime())) /
-            60000
-        )
-      ).padStart(2, '0');
-
-      const secs = String(
-        Math.floor(
-          ((now.getTime() -
-            (recordingStartRef.current ||
-              now.getTime())) %
-            60000) /
-            1000
-        )
-      ).padStart(2, '0');
-
-      setTimelineData((previous) => {
-        const updated = [
-          ...previous,
-          {
-            time: `${mins}:${secs}`,
-            score: safeScore,
-          },
-        ];
-
-        return updated.slice(-20);
-      });
-    }
-
-    const level =
-      message.risk?.threat_level;
-
-    if (level) {
-      setRiskLevel(
-        level.toUpperCase()
-      );
-    }
-
-    if (message.risk?.recommendation) {
-      setRecommendation(
-        message.risk.recommendation
-      );
-    }
-  };
-
-  /*
-   * ---------------------------------------------------------
-   * OPEN WEBSOCKET
-   * ---------------------------------------------------------
-   */
-
-  const connectWebSocket = (): Promise<void> => {
-    return new Promise(
-      (resolve, reject) => {
-        try {
-          const socket = new WebSocket(
-            `${WS_BASE}/ws/live-monitor`
-          );
-
-          websocketRef.current = socket;
-
-          socket.onopen = () => {
-            console.log(
-              'VIGIL WebSocket connected'
-            );
-
-            wsConnectedRef.current = true;
-
-            setConnectionStatus(
-              'CONNECTED'
-            );
-
-            /*
-             * Tell backend that a new
-             * monitoring session started.
-             */
-
-            sendWebSocketMessage({
-              type: 'start_session',
-              target_speaker_id:
-                selectedSpeakerId || null,
-            });
-
-            resolve();
-          };
-
-          socket.onmessage = (
-            event
-          ) => {
-            try {
-              const message =
-                JSON.parse(
-                  event.data
-                ) as AnalysisMessage;
-
-              console.log(
-                'VIGIL analysis:',
-                message
-              );
-
-              if (
-                message.type ===
-                'error'
-              ) {
-                console.error(
-                  'Backend analysis error:',
-                  message
-                );
-
-                return;
-              }
-
-              processAnalysisMessage(
-                message
-              );
-            } catch (error) {
-              console.error(
-                'Invalid WebSocket message:',
-                error
-              );
-            }
-          };
-
-          socket.onerror = (event) => {
-            console.error(
-              'VIGIL WebSocket error:',
-              event
-            );
-
-            setConnectionStatus(
-              'ERROR'
-            );
-
-            wsConnectedRef.current =
-              false;
-
-            reject(
-              new Error(
-                'Unable to connect to VIGIL analysis server.'
-              )
-            );
-          };
-
-          socket.onclose = () => {
-            console.log(
-              'VIGIL WebSocket disconnected'
-            );
-
-            wsConnectedRef.current =
-              false;
-
-            setConnectionStatus(
-              'OFFLINE'
-            );
-          };
-        } catch (error) {
-          reject(error);
-        }
-      }
+    setSpeakerStatus(
+      speaker?.status ||
+      'NOT_ENROLLED'
     );
-  };
 
-  /*
-   * ---------------------------------------------------------
-   * SPEECH TO TEXT
-   * ---------------------------------------------------------
-   */
+    // -------------------------------------------------------
+    // IMPERSONATION
+    // -------------------------------------------------------
 
-  const startSpeechRecognition = () => {
-    if (typeof window === 'undefined') {
-      return;
-    }
+    setImpersonation(
+      message.context_analysis
+        ?.impersonation_context ||
+      'NONE'
+    );
 
-    const SpeechRecognition =
-      window.SpeechRecognition ||
-      window.webkitSpeechRecognition;
+    // -------------------------------------------------------
+    // TRANSCRIPT
+    // -------------------------------------------------------
 
-    if (!SpeechRecognition) {
-      setSpeechStatus(
-        'UNSUPPORTED'
-      );
+    const incomingTranscript =
+      message.transcript?.trim() || '';
 
-      setRecommendation(
-        'Live speech-to-text is not supported by this browser. Use a Chromium-based browser such as Chrome or Edge.'
-      );
+    if (incomingTranscript) {
+      const previousTranscript =
+        lastTranscriptRef.current;
 
-      return;
-    }
-
-    const recognition =
-      new SpeechRecognition();
-
-    recognition.continuous = true;
-    recognition.interimResults = true;
-
-    /*
-     * Indian English is used because this
-     * application is intended for Indian
-     * voice-security scenarios.
-     */
-
-    recognition.lang = 'en-IN';
-
-    recognition.onstart = () => {
-      console.log(
-        'Speech recognition started'
-      );
-
-      setSpeechStatus(
-        'LISTENING'
-      );
-    };
-
-    recognition.onresult = (
-      event
-    ) => {
-      let finalText = '';
-      let interimText = '';
-
-      for (
-        let i = 0;
-        i < event.results.length;
-        i++
+      if (
+        incomingTranscript !==
+        previousTranscript
       ) {
-        const result =
-          event.results[i];
+        lastTranscriptRef.current =
+          incomingTranscript;
 
-        const transcript =
-          result[0]?.transcript || '';
-
-        if (result.isFinal) {
-          finalText +=
-            transcript + ' ';
-        } else {
-          interimText +=
-            transcript + ' ';
-        }
-      }
-
-      finalText =
-        finalText.trim();
-
-      interimText =
-        interimText.trim();
-
-      /*
-       * Add final transcript to
-       * VIGIL transcript history.
-       */
-
-      if (finalText) {
-        finalTranscriptRef.current =
-          `${finalTranscriptRef.current} ${finalText}`.trim();
-
-        const id =
-          ++transcriptIdRef.current;
+        utteranceIdRef.current += 1;
 
         setTranscriptUtterances(
           (previous) => [
             ...previous,
             {
-              id,
+              id:
+                utteranceIdRef.current,
               speaker: 'CALLER',
-              text: finalText,
+              text: incomingTranscript,
+              flags:
+                message.context_analysis
+                  ?.risk_factors || [],
             },
-          ].slice(-50)
-        );
-
-        /*
-         * Send actual spoken text
-         * to backend.
-         */
-
-        sendWebSocketMessage({
-          type: 'transcript',
-          text: finalText,
-          target_speaker_id:
-            selectedSpeakerId || null,
-        });
-      }
-
-      /*
-       * Interim text is deliberately
-       * not permanently inserted into
-       * the transcript list.
-       */
-      void interimText;
-    };
-
-    recognition.onerror = (
-      event
-    ) => {
-      console.error(
-        'Speech recognition error:',
-        event.error
-      );
-
-      if (
-        event.error ===
-        'not-allowed'
-      ) {
-        setSpeechStatus(
-          'PERMISSION DENIED'
-        );
-
-        setRecommendation(
-          'Microphone permission was denied for speech recognition. Allow microphone access in your browser and start the monitor again.'
-        );
-      } else if (
-        event.error ===
-        'no-speech'
-      ) {
-        setSpeechStatus(
-          'WAITING FOR SPEECH'
-        );
-      } else {
-        setSpeechStatus(
-          'ERROR'
+          ].slice(-20)
         );
       }
-    };
-
-    recognition.onend = () => {
-      console.log(
-        'Speech recognition ended'
-      );
-
-      if (
-        shouldRestartRecognitionRef.current &&
-        isRecording
-      ) {
-        try {
-          recognition.start();
-        } catch {
-          // Browser can throw if recognition
-          // is already starting.
-        }
-      } else {
-        setSpeechStatus(
-          'STOPPED'
-        );
-      }
-    };
-
-    recognitionRef.current =
-      recognition;
-
-    shouldRestartRecognitionRef.current =
-      true;
-
-    try {
-      recognition.start();
-    } catch (error) {
-      console.error(
-        'Could not start speech recognition:',
-        error
-      );
-    }
-  };
-
-  /*
-   * ---------------------------------------------------------
-   * AUDIO STREAM
-   * ---------------------------------------------------------
-   */
-
-  const startAudioStreaming = (
-    stream: MediaStream
-  ) => {
-    if (
-      typeof MediaRecorder ===
-      'undefined'
-    ) {
-      setRecommendation(
-        'MediaRecorder is not supported by this browser.'
-      );
-
-      return;
     }
 
-    let mimeType = '';
+    // -------------------------------------------------------
+    // TIMELINE
+    // -------------------------------------------------------
 
-    if (
-      MediaRecorder.isTypeSupported(
-        'audio/webm;codecs=opus'
-      )
-    ) {
-      mimeType =
-        'audio/webm;codecs=opus';
-    } else if (
-      MediaRecorder.isTypeSupported(
-        'audio/webm'
-      )
-    ) {
-      mimeType =
-        'audio/webm';
-    }
-
-    const recorder =
-      mimeType
-        ? new MediaRecorder(
-            stream,
-            { mimeType }
-          )
-        : new MediaRecorder(stream);
-
-    mediaRecorderRef.current =
-      recorder;
-
-    recorder.ondataavailable =
-      async (event) => {
-        if (
-          !event.data ||
-          event.data.size === 0
-        ) {
-          return;
-        }
-
-        /*
-         * Convert the audio chunk to
-         * base64 so it can safely travel
-         * through the JSON WebSocket
-         * protocol.
-         */
-
-        try {
-          const buffer =
-            await event.data.arrayBuffer();
-
-          const bytes =
-            new Uint8Array(buffer);
-
-          let binary = '';
-
-          const chunkSize = 0x8000;
-
-          for (
-  let i = 0;
-  i < bytes.length;
-  i += chunkSize
-) {
-  const end = Math.min(
-    i + chunkSize,
-    bytes.length
-  );
-
-  for (let j = i; j < end; j++) {
-    binary += String.fromCharCode(
-      bytes[j]
+    setTimelineData(
+      (previous) => [
+        ...previous,
+        {
+          time: formatTime(
+            duration
+          ),
+          score: newRiskScore,
+        },
+      ].slice(-30)
     );
-  }
-}
+  };
 
-          const base64 =
-            btoa(binary);
+  // =========================================================
+  // CONNECT WEBSOCKET
+  // =========================================================
 
-          sendWebSocketMessage({
-            type: 'audio_chunk',
-            audio: base64,
-            mime_type:
-              recorder.mimeType ||
-              'audio/webm',
-            target_speaker_id:
-              selectedSpeakerId || null,
-          });
-        } catch (error) {
-          console.error(
-            'Failed to encode audio chunk:',
+  const connectWebSocket =
+    (): Promise<WebSocket> => {
+      return new Promise(
+        (resolve, reject) => {
+          const websocket =
+            new WebSocket(
+              BACKEND_WS_URL
+            );
+
+          websocketRef.current =
+            websocket;
+
+          websocket.onopen = () => {
+            console.log(
+              '[VIGIL] WebSocket connected'
+            );
+
+            websocket.send(
+              JSON.stringify({
+                type: 'start_session',
+                speaker_id:
+                  selectedSpeakerId ||
+                  null,
+              })
+            );
+
+            resolve(websocket);
+          };
+
+          websocket.onmessage =
+            (event) => {
+              try {
+                const message =
+                  JSON.parse(
+                    event.data
+                  );
+
+                processAnalysisMessage(
+                  message
+                );
+              } catch (error) {
+                console.error(
+                  '[VIGIL] Invalid WebSocket message:',
+                  error
+                );
+              }
+            };
+
+          websocket.onerror = (
             error
-          );
-        }
-      };
+          ) => {
+            console.error(
+              '[VIGIL] WebSocket error:',
+              error
+            );
 
-    recorder.onerror = (
-      event
-    ) => {
-      console.error(
-        'MediaRecorder error:',
-        event
+            reject(
+              new Error(
+                'Could not connect to VIGIL live analysis server.'
+              )
+            );
+          };
+
+          websocket.onclose = () => {
+            console.log(
+              '[VIGIL] WebSocket closed'
+            );
+
+            websocketRef.current =
+              null;
+          };
+        }
       );
     };
 
-    /*
-     * Send an audio chunk every
-     * second for near-real-time analysis.
-     */
+  // =========================================================
+  // START SPEECH RECOGNITION
+  // =========================================================
 
-    recorder.start(1000);
-  };
-
-  /*
-   * ---------------------------------------------------------
-   * START MONITOR
-   * ---------------------------------------------------------
-   */
-
-  const startMonitoring =
-    async () => {
-      if (isRecording) {
+  const startSpeechRecognition =
+    () => {
+      if (typeof window === 'undefined') {
         return;
       }
 
-      resetAnalysis();
+      const SpeechRecognition =
+        (window as any)
+          .SpeechRecognition ||
+        (window as any)
+          .webkitSpeechRecognition;
 
-      setConnectionStatus(
-        'CONNECTING'
-      );
+      if (!SpeechRecognition) {
+        console.warn(
+          '[VIGIL] Browser speech recognition is not available.'
+        );
 
-      setMicrophoneStatus(
-        'REQUESTING'
-      );
+        return;
+      }
 
       try {
-        /*
-         * IMPORTANT:
-         * getUserMedia MUST be triggered
-         * by the user's button action.
-         *
-         * This causes the browser to show
-         * the microphone permission dialog.
-         */
+        const recognition =
+          new SpeechRecognition();
+
+        recognition.continuous = true;
+
+        recognition.interimResults =
+          true;
+
+        recognition.lang =
+          'en-IN';
+
+        recognition.onresult = (
+          event: any
+        ) => {
+          let combinedText = '';
+
+          for (
+            let i =
+              event.resultIndex;
+            i <
+            event.results.length;
+            i++
+          ) {
+            const result =
+              event.results[i];
+
+            const text =
+              result[0]
+                ?.transcript || '';
+
+            if (
+              result.isFinal
+            ) {
+              combinedText +=
+                `${text} `;
+            }
+          }
+
+          const finalText =
+            combinedText.trim();
+
+          if (!finalText) {
+            return;
+          }
+
+          transcriptRef.current =
+            finalText;
+
+          const websocket =
+            websocketRef.current;
+
+          if (
+            websocket &&
+            websocket.readyState ===
+              WebSocket.OPEN
+          ) {
+            websocket.send(
+              JSON.stringify({
+                type: 'transcript',
+                text: finalText,
+              })
+            );
+          }
+        };
+
+        recognition.onerror = (
+          event: any
+        ) => {
+          console.warn(
+            '[VIGIL] Speech recognition error:',
+            event?.error
+          );
+        };
+
+        recognition.onend = () => {
+          if (
+            isRecordingRef.current
+          ) {
+            try {
+              recognition.start();
+            } catch {
+              // Browser may already be restarting.
+            }
+          }
+        };
+
+        speechRecognitionRef.current =
+          recognition;
+
+        recognition.start();
+
+        console.log(
+          '[VIGIL] Speech recognition started'
+        );
+      } catch (error) {
+        console.warn(
+          '[VIGIL] Could not start speech recognition:',
+          error
+        );
+      }
+    };
+
+  // =========================================================
+  // STOP SPEECH RECOGNITION
+  // =========================================================
+
+  const stopSpeechRecognition =
+    () => {
+      const recognition =
+        speechRecognitionRef.current;
+
+      if (recognition) {
+        try {
+          recognition.onend =
+            null;
+
+          recognition.stop();
+        } catch {
+          // Already stopped.
+        }
+      }
+
+      speechRecognitionRef.current =
+        null;
+    };
+
+  // =========================================================
+  // START MICROPHONE
+  // =========================================================
+
+  const startMicrophone =
+    async () => {
+      if (
+        isRecordingRef.current
+      ) {
+        return;
+      }
+
+      try {
+        // Reset session state.
+        setRiskScore(0);
+        setRiskLevel('LOW');
+        setSynthProb(0);
+        setSpeakerSimilarity(null);
+        setSpeakerStatus(
+          selectedSpeakerId
+            ? 'CHECKING'
+            : 'NOT_ENROLLED'
+        );
+        setImpersonation('NONE');
+        setDuration(0);
+        setTimelineData([]);
+        setTranscriptUtterances([]);
+
+        transcriptRef.current =
+          '';
+
+        lastTranscriptRef.current =
+          '';
+
+        utteranceIdRef.current =
+          0;
+
+        // -----------------------------------------------------
+        // REQUEST MICROPHONE
+        // -----------------------------------------------------
 
         const stream =
           await navigator.mediaDevices.getUserMedia(
             {
               audio: {
+                channelCount: 1,
                 echoCancellation: true,
                 noiseSuppression: true,
                 autoGainControl: true,
               },
-              video: false,
             }
           );
 
         mediaStreamRef.current =
           stream;
 
-        setMicrophoneStatus(
-          'ACTIVE'
-        );
+        // -----------------------------------------------------
+        // CONNECT WEBSOCKET
+        // -----------------------------------------------------
 
-        /*
-         * Connect backend.
-         */
-
-        try {
+        const websocket =
           await connectWebSocket();
-        } catch (error) {
-          console.error(
-            'WebSocket connection failed:',
-            error
-          );
 
-          /*
-           * Do not stop microphone simply
-           * because backend connection failed.
-           * STT can still work locally.
-           */
+        // -----------------------------------------------------
+        // AUDIO CONTEXT
+        // -----------------------------------------------------
 
-          setConnectionStatus(
-            'ERROR'
-          );
+        const AudioContextClass =
+          window.AudioContext ||
+          (window as any)
+            .webkitAudioContext;
 
-          setRecommendation(
-            'Microphone and browser speech recognition are active, but the VIGIL analysis server could not be reached.'
+        if (!AudioContextClass) {
+          throw new Error(
+            'Web Audio API is not supported by this browser.'
           );
         }
 
-        /*
-         * Start audio streaming.
-         */
+        const audioContext =
+          new AudioContextClass();
 
-        startAudioStreaming(
-          stream
+        audioContextRef.current =
+          audioContext;
+
+        await audioContext.resume();
+
+        // -----------------------------------------------------
+        // MICROPHONE SOURCE
+        // -----------------------------------------------------
+
+        const source =
+          audioContext.createMediaStreamSource(
+            stream
+          );
+
+        audioSourceRef.current =
+          source;
+
+        // -----------------------------------------------------
+        // PCM PROCESSOR
+        // -----------------------------------------------------
+
+        const processor =
+          audioContext.createScriptProcessor(
+            4096,
+            1,
+            1
+          );
+
+        processorRef.current =
+          processor;
+
+        processor.onaudioprocess =
+          (event) => {
+            if (
+              !isRecordingRef.current
+            ) {
+              return;
+            }
+
+            if (
+              websocket.readyState !==
+              WebSocket.OPEN
+            ) {
+              return;
+            }
+
+            const input =
+              event.inputBuffer.getChannelData(
+                0
+              );
+
+            const pcmBase64 =
+              float32ToPCM16Base64(
+                input
+              );
+
+            websocket.send(
+              JSON.stringify({
+                type: 'audio_chunk',
+                audio_b64:
+                  pcmBase64,
+                sample_rate:
+                  audioContext.sampleRate,
+                channels: 1,
+                timestamp:
+                  new Date().toISOString(),
+              })
+            );
+          };
+
+        source.connect(
+          processor
         );
 
         /*
-         * Start browser STT.
+         * Connect to destination so the ScriptProcessor
+         * remains active in browsers.
+         *
+         * The microphone stream itself is not routed
+         * directly to the speakers.
          */
+        processor.connect(
+          audioContext.destination
+        );
 
-        startSpeechRecognition();
+        // -----------------------------------------------------
+        // MARK RECORDING ACTIVE
+        // -----------------------------------------------------
+
+        isRecordingRef.current =
+          true;
 
         setIsRecording(true);
 
-        startTimer();
+        // -----------------------------------------------------
+        // START SPEECH RECOGNITION
+        // -----------------------------------------------------
 
-        setRecommendation(
-          'VIGIL is listening. Speak normally; the system will analyze the conversation and update the risk score.'
+        startSpeechRecognition();
+
+        console.log(
+          '[VIGIL] Live microphone monitoring started'
         );
-      } catch (error: unknown) {
+      } catch (error) {
         console.error(
-          'Microphone access failed:',
+          '[VIGIL] Failed to start microphone:',
           error
         );
 
-        setMicrophoneStatus(
-          'DENIED'
+        stopAllMonitoring();
+
+        alert(
+          'VIGIL could not start microphone monitoring. Please allow microphone access and try again.'
         );
-
-        setIsRecording(false);
-
-        setConnectionStatus(
-          'OFFLINE'
-        );
-
-        if (
-          error instanceof DOMException &&
-          error.name ===
-            'NotAllowedError'
-        ) {
-          setRecommendation(
-            'Microphone permission was denied. Allow microphone access for this site in your browser settings and press Start again.'
-          );
-        } else if (
-          error instanceof DOMException &&
-          error.name ===
-            'NotFoundError'
-        ) {
-          setRecommendation(
-            'No microphone was found. Connect a microphone and try again.'
-          );
-        } else {
-          setRecommendation(
-            'VIGIL could not access the microphone. Check your browser microphone permissions.'
-          );
-        }
       }
     };
 
-  /*
-   * ---------------------------------------------------------
-   * STOP MONITOR
-   * ---------------------------------------------------------
-   */
+  // =========================================================
+  // STOP EVERYTHING
+  // =========================================================
 
-  const stopEverything = () => {
-    shouldRestartRecognitionRef.current =
-      false;
+  const stopAllMonitoring =
+    () => {
+      isRecordingRef.current =
+        false;
 
-    /*
-     * Stop speech recognition.
-     */
+      stopSpeechRecognition();
 
-    if (recognitionRef.current) {
+      // -------------------------------------------------------
+      // AUDIO PROCESSOR
+      // -------------------------------------------------------
+
       try {
-        recognitionRef.current.stop();
+        processorRef.current?.disconnect();
       } catch {
-        // Already stopped.
+        // Already disconnected.
       }
 
-      recognitionRef.current =
+      processorRef.current =
         null;
-    }
 
-    /*
-     * Stop MediaRecorder.
-     */
+      // -------------------------------------------------------
+      // AUDIO SOURCE
+      // -------------------------------------------------------
 
-    if (
-      mediaRecorderRef.current
-    ) {
       try {
-        if (
-          mediaRecorderRef.current
-            .state !== 'inactive'
-        ) {
-          mediaRecorderRef.current.stop();
-        }
+        audioSourceRef.current?.disconnect();
       } catch {
-        // Already stopped.
+        // Already disconnected.
       }
 
-      mediaRecorderRef.current =
+      audioSourceRef.current =
         null;
-    }
 
-    /*
-     * Release microphone.
-     */
+      // -------------------------------------------------------
+      // MICROPHONE TRACKS
+      // -------------------------------------------------------
 
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current
-        .getTracks()
-        .forEach((track) => {
-          track.stop();
-        });
+      if (
+        mediaStreamRef.current
+      ) {
+        mediaStreamRef.current
+          .getTracks()
+          .forEach(
+            (track) => {
+              track.stop();
+            }
+          );
+      }
 
       mediaStreamRef.current =
         null;
-    }
 
-    /*
-     * Close WebSocket.
-     */
+      // -------------------------------------------------------
+      // AUDIO CONTEXT
+      // -------------------------------------------------------
 
-    if (websocketRef.current) {
-      try {
-        websocketRef.current.close();
-      } catch {
-        // Already closed.
+      if (
+        audioContextRef.current
+      ) {
+        try {
+          audioContextRef.current.close();
+        } catch {
+          // Already closed.
+        }
+      }
+
+      audioContextRef.current =
+        null;
+
+      // -------------------------------------------------------
+      // WEBSOCKET
+      // -------------------------------------------------------
+
+      const websocket =
+        websocketRef.current;
+
+      if (websocket) {
+        try {
+          if (
+            websocket.readyState ===
+            WebSocket.OPEN
+          ) {
+            websocket.send(
+              JSON.stringify({
+                type: 'stop_session',
+              })
+            );
+          }
+        } catch {
+          // Ignore send failure during cleanup.
+        }
+
+        try {
+          websocket.close();
+        } catch {
+          // Already closed.
+        }
       }
 
       websocketRef.current =
         null;
-    }
 
-    wsConnectedRef.current =
-      false;
+      setIsRecording(false);
+      setDuration(0);
 
-    stopTimer();
+      console.log(
+        '[VIGIL] Live monitoring stopped'
+      );
+    };
 
-    setIsRecording(false);
+  // =========================================================
+  // START / STOP BUTTON
+  // =========================================================
 
-    setMicrophoneStatus('OFF');
+  const toggleRecording =
+    async () => {
+      if (
+        isRecordingRef.current
+      ) {
+        stopAllMonitoring();
+      } else {
+        await startMicrophone();
+      }
+    };
 
-    setSpeechStatus('STANDBY');
+  // =========================================================
+  // UI HELPERS
+  // =========================================================
 
-    setConnectionStatus('OFFLINE');
+  const getSpeakerDisplay =
+    () => {
+      if (
+        speakerSimilarity ===
+        null
+      ) {
+        return '--';
+      }
 
-    setDuration(0);
+      return `${(
+        speakerSimilarity * 100
+      ).toFixed(0)}%`;
+    };
 
-    recordingStartRef.current =
-      null;
-  };
+  const getSpeakerStatusLabel =
+    () => {
+      if (
+        speakerStatus ===
+        'NOT_ENROLLED'
+      ) {
+        return 'NOT ENROLLED';
+      }
 
-  const toggleRecording = () => {
-    if (isRecording) {
-      stopEverything();
-    } else {
-      void startMonitoring();
-    }
-  };
+      if (
+        speakerStatus ===
+        'CHECKING'
+      ) {
+        return 'CHECKING';
+      }
 
-  /*
-   * ---------------------------------------------------------
-   * RISK COLOR
-   * ---------------------------------------------------------
-   */
+      return speakerStatus;
+    };
 
-  const riskChartColor =
-    riskScore > 60
-      ? '#EF4444'
-      : '#3B82F6';
+  const getSpeakerStatusClass =
+    () => {
+      if (
+        speakerStatus ===
+        'MATCH'
+      ) {
+        return 'bg-emerald-500/20 text-emerald-400';
+      }
 
-  /*
-   * ---------------------------------------------------------
-   * RECOMMENDED ACTION
-   * ---------------------------------------------------------
-   */
+      if (
+        speakerStatus ===
+        'NOT_ENROLLED'
+      ) {
+        return 'bg-amber-500/20 text-amber-400 border border-amber-500/30';
+      }
 
-  const displayedRecommendation =
-    recommendation ||
-    (riskLevel === 'CRITICAL'
+      if (
+        speakerStatus ===
+        'CHECKING'
+      ) {
+        return 'bg-blue-500/20 text-blue-400 border border-blue-500/30';
+      }
+
+      return 'bg-red-500/20 text-red-400 border border-red-500/30';
+    };
+
+  const recommendedAction =
+    riskLevel === 'CRITICAL'
       ? 'Do NOT share OTP, PIN, credentials or transfer money. Terminate the interaction immediately and independently verify the caller.'
       : riskLevel === 'HIGH'
       ? 'Do not share sensitive information. Verify the caller through an independent trusted channel.'
-      : 'Conversation appears normal. Continue with standard security hygiene.');
+      : riskLevel === 'MODERATE'
+      ? 'Exercise heightened caution. Do not share financial or account details without independent verification.'
+      : riskLevel === 'GUARDED'
+      ? 'Suspicious signals detected. Verify the caller identity before sharing sensitive information.'
+      : 'Conversation appears normal. Continue with standard security hygiene.';
 
-  /*
-   * ---------------------------------------------------------
-   * UI
-   * ---------------------------------------------------------
-   */
+  // =========================================================
+  // UI
+  // =========================================================
 
   return (
     <div className="p-6 space-y-6">
@@ -1288,26 +1148,22 @@ export const LiveMonitorView: React.FC = () => {
           {speakerProfiles.length > 0 ? (
             <select
               value={selectedSpeakerId}
-              onChange={(event) =>
+              onChange={(e) =>
                 setSelectedSpeakerId(
-                  event.target.value
+                  e.target.value
                 )
               }
               disabled={isRecording}
               className="bg-[#192233] border border-[#26334D] text-xs font-bold text-blue-400 rounded px-2.5 py-1 focus:outline-none disabled:opacity-50"
             >
               {speakerProfiles.map(
-                (profile) => (
+                (p) => (
                   <option
-                    key={
-                      profile.speaker_id
-                    }
-                    value={
-                      profile.speaker_id
-                    }
+                    key={p.speaker_id}
+                    value={p.speaker_id}
                   >
-                    {profile.speaker_id} (
-                    {profile.name})
+                    {p.speaker_id} (
+                    {p.name})
                   </option>
                 )
               )}
@@ -1322,11 +1178,8 @@ export const LiveMonitorView: React.FC = () => {
 
       {/* Main 3-Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-
         {/* Left Column */}
         <div className="lg:col-span-4 space-y-6">
-
-          {/* Waveform */}
           <div className="bg-[#121824] border border-[#26334D] rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider font-mono">
@@ -1358,13 +1211,11 @@ export const LiveMonitorView: React.FC = () => {
             />
           </div>
 
-          {/* Voice Metrics */}
           <div className="bg-[#121824] border border-[#26334D] rounded-xl p-5 space-y-4">
             <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider font-mono border-b border-[#26334D] pb-2">
               Voice Authenticity Metrics
             </h3>
 
-            {/* AI Voice Probability */}
             <div className="flex items-center justify-between bg-[#192233] p-3 rounded-lg border border-[#26334D]">
               <div>
                 <div className="text-xs text-gray-400">
@@ -1372,9 +1223,9 @@ export const LiveMonitorView: React.FC = () => {
                 </div>
 
                 <div className="text-lg font-bold font-mono text-white">
-                  {(
-                    synthProb * 100
-                  ).toFixed(0)}
+                  {(synthProb * 100).toFixed(
+                    0
+                  )}
                   %
                 </div>
               </div>
@@ -1382,19 +1233,18 @@ export const LiveMonitorView: React.FC = () => {
               <div
                 className={`px-2.5 py-1 text-xs font-bold rounded ${
                   synthProb >
-                  0.6
+                  0.60
                     ? 'bg-red-500/20 text-red-400 border border-red-500/30'
                     : 'bg-emerald-500/20 text-emerald-400'
                 }`}
               >
                 {synthProb >
-                0.6
+                0.60
                   ? 'SYNTHETIC'
                   : 'REAL HUMAN'}
               </div>
             </div>
 
-            {/* Speaker Match */}
             <div className="flex items-center justify-between bg-[#192233] p-3 rounded-lg border border-[#26334D]">
               <div>
                 <div className="text-xs text-gray-400">
@@ -1402,32 +1252,17 @@ export const LiveMonitorView: React.FC = () => {
                 </div>
 
                 <div className="text-lg font-bold font-mono text-white">
-                  {speakerSimilarity ===
-                  null
-                    ? '--'
-                    : `${(
-                        speakerSimilarity *
-                        100
-                      ).toFixed(0)}%`}
+                  {getSpeakerDisplay()}
                 </div>
               </div>
 
               <div
-                className={`px-2.5 py-1 text-xs font-bold rounded ${
-                  speakerStatus ===
-                  'MATCH'
-                    ? 'bg-emerald-500/20 text-emerald-400'
-                    : speakerStatus ===
-                      'NOT ENROLLED'
-                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                    : 'bg-red-500/20 text-red-400 border border-red-500/30'
-                }`}
+                className={`px-2.5 py-1 text-xs font-bold rounded ${getSpeakerStatusClass()}`}
               >
-                {speakerStatus}
+                {getSpeakerStatusLabel()}
               </div>
             </div>
 
-            {/* Context */}
             <div className="flex items-center justify-between bg-[#192233] p-3 rounded-lg border border-[#26334D]">
               <div>
                 <div className="text-xs text-gray-400">
@@ -1446,10 +1281,7 @@ export const LiveMonitorView: React.FC = () => {
 
         {/* Center Column */}
         <div className="lg:col-span-5 space-y-6">
-
-          {/* Risk Gauge */}
           <div className="bg-[#121824] border border-[#26334D] rounded-xl p-6 flex flex-col items-center justify-center text-center">
-
             <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider font-mono mb-2">
               DYNAMIC RISK EVALUATION
             </h3>
@@ -1468,9 +1300,6 @@ export const LiveMonitorView: React.FC = () => {
                   : riskLevel ===
                     'HIGH'
                   ? 'bg-orange-500/10 border-orange-500/40 text-orange-300'
-                  : riskLevel ===
-                    'MEDIUM'
-                  ? 'bg-yellow-500/10 border-yellow-500/40 text-yellow-300'
                   : 'bg-blue-500/10 border-blue-500/30 text-blue-300'
               }`}
             >
@@ -1482,13 +1311,12 @@ export const LiveMonitorView: React.FC = () => {
                 </div>
 
                 <div className="text-xs mt-1 leading-relaxed">
-                  {displayedRecommendation}
+                  {recommendedAction}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Timeline */}
           <div className="bg-[#121824] border border-[#26334D] rounded-xl p-5">
             <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider font-mono mb-3">
               Conversation Risk Timeline
@@ -1500,9 +1328,7 @@ export const LiveMonitorView: React.FC = () => {
                 height="100%"
               >
                 <LineChart
-                  data={
-                    timelineData
-                  }
+                  data={timelineData}
                 >
                   <XAxis
                     dataKey="time"
@@ -1513,10 +1339,7 @@ export const LiveMonitorView: React.FC = () => {
                   />
 
                   <YAxis
-                    domain={[
-                      0,
-                      100,
-                    ]}
+                    domain={[0, 100]}
                     stroke="#4B5563"
                     tick={{
                       fontSize: 10,
@@ -1536,7 +1359,9 @@ export const LiveMonitorView: React.FC = () => {
                     type="monotone"
                     dataKey="score"
                     stroke={
-                      riskChartColor
+                      riskScore > 60
+                        ? '#EF4444'
+                        : '#3B82F6'
                     }
                     strokeWidth={3}
                     dot={{
@@ -1551,79 +1376,16 @@ export const LiveMonitorView: React.FC = () => {
 
         {/* Right Column */}
         <div className="lg:col-span-3 bg-[#121824] border border-[#26334D] rounded-xl p-5 flex flex-col justify-between h-full">
-
           <div>
             <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider font-mono border-b border-[#26334D] pb-2 mb-4">
               Live Speech-to-Text Transcript
             </h3>
 
-            {/* System status */}
-            <div className="mb-4 grid grid-cols-3 gap-2">
-
-              <div className="bg-[#192233] border border-[#26334D] rounded-lg p-2">
-                <div className="text-[9px] text-gray-500 font-mono">
-                  MIC
-                </div>
-
-                <div
-                  className={`text-[10px] font-bold ${
-                    microphoneStatus ===
-                    'ACTIVE'
-                      ? 'text-emerald-400'
-                      : 'text-gray-400'
-                  }`}
-                >
-                  {microphoneStatus}
-                </div>
-              </div>
-
-              <div className="bg-[#192233] border border-[#26334D] rounded-lg p-2">
-                <div className="text-[9px] text-gray-500 font-mono">
-                  STT
-                </div>
-
-                <div
-                  className={`text-[10px] font-bold ${
-                    speechStatus ===
-                    'LISTENING'
-                      ? 'text-emerald-400'
-                      : 'text-gray-400'
-                  }`}
-                >
-                  {speechStatus}
-                </div>
-              </div>
-
-              <div className="bg-[#192233] border border-[#26334D] rounded-lg p-2">
-                <div className="text-[9px] text-gray-500 font-mono">
-                  AI
-                </div>
-
-                <div
-                  className={`text-[10px] font-bold ${
-                    connectionStatus ===
-                    'CONNECTED'
-                      ? 'text-emerald-400'
-                      : connectionStatus ===
-                        'ERROR'
-                      ? 'text-red-400'
-                      : 'text-gray-400'
-                  }`}
-                >
-                  {connectionStatus}
-                </div>
-              </div>
-
-            </div>
-
             <div className="space-y-4 max-h-[460px] overflow-y-auto pr-1">
-
               {transcriptUtterances.length ===
               0 ? (
-                <div className="bg-[#192233] p-4 rounded-lg border border-[#26334D] text-center">
-                  <Mic className="w-5 h-5 text-gray-500 mx-auto mb-2" />
-
-                  <p className="text-xs text-gray-500">
+                <div className="bg-[#192233] p-3 rounded-lg border border-[#26334D]">
+                  <p className="text-xs text-gray-500 leading-relaxed">
                     {isRecording
                       ? 'Listening for speech...'
                       : 'Start the microphone monitor to begin live transcription.'}
@@ -1631,18 +1393,14 @@ export const LiveMonitorView: React.FC = () => {
                 </div>
               ) : (
                 transcriptUtterances.map(
-                  (utterance) => (
+                  (u) => (
                     <div
-                      key={
-                        utterance.id
-                      }
+                      key={u.id}
                       className="bg-[#192233] p-3 rounded-lg border border-[#26334D] space-y-2"
                     >
                       <div className="flex items-center justify-between text-[10px] font-mono text-gray-400">
                         <span className="font-bold text-blue-400">
-                          {
-                            utterance.speaker
-                          }
+                          {u.speaker}
                         </span>
 
                         <span>
@@ -1651,25 +1409,22 @@ export const LiveMonitorView: React.FC = () => {
                       </div>
 
                       <p className="text-xs text-gray-200 leading-relaxed font-sans">
-                        {
-                          utterance.text
-                        }
+                        {u.text}
                       </p>
 
-                      {utterance.flags &&
-                        utterance
-                          .flags
-                          .length >
+                      {u.flags &&
+                        u.flags.length >
                           0 && (
-                          <div className="flex flex-wrap gap-1">
-                            {utterance.flags.map(
+                          <div className="flex flex-wrap gap-1 pt-1">
+                            {u.flags.map(
                               (
-                                flag,
-                                index
+                                flag
                               ) => (
                                 <span
-                                  key={`${flag}-${index}`}
-                                  className="text-[9px] px-2 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20"
+                                  key={
+                                    flag
+                                  }
+                                  className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-red-400 font-mono"
                                 >
                                   {flag}
                                 </span>
@@ -1681,7 +1436,6 @@ export const LiveMonitorView: React.FC = () => {
                   )
                 )
               )}
-
             </div>
           </div>
         </div>
