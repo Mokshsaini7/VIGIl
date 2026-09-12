@@ -29,11 +29,11 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, onSwitchTo
       formData.append('username', username);
       formData.append('password', password);
 
-      const res = await fetch('http://://vigil-backend-bbwj.onrender.com/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: formData.toString()
-      });
+      const res = await fetch('https://vigil-backend-bbwj.onrender.com/api/auth/login', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  body: formData.toString()
+});
 
       if (res.ok) {
         const data = await res.json();
