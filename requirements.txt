@@ -23,3 +23,6 @@ pytest>=8.0.0
 
 # PostgreSQL
 psycopg2-binary>=2.9.9
+
+# Email validation for Pydantic
+email-validator>=2.2.0
