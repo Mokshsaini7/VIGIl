@@ -1,907 +1,716 @@
 """
-VIGIL — Real-Time WebSocket Audio Handler
+VIGIL — Speaker Verification Engine
 
-Provides:
-    /ws/analyze
-    /ws/live-monitor
+Responsibilities:
+- Create deterministic speaker embeddings from acoustic features
+- Register trusted speaker profiles
+- Compare incoming voice samples with enrolled profiles
+- Return speaker match / mismatch information
 
-Receives:
-    - raw PCM16 microphone audio
-    - browser speech-to-text transcript
-    - control messages
-
-Returns:
-    - voice authenticity analysis
-    - speaker verification
-    - context analysis
-    - dynamic risk score
-    - threat classification
+Important:
+This is an MVP acoustic speaker-verification baseline.
+It is NOT a production-grade biometric model.
+A pretrained speaker-embedding model can later replace
+the embedding implementation without changing the pipeline API.
 """
 
-import base64
-import json
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-
-from ai.pipeline import VigilAIPipeline
 
 
-router = APIRouter()
-
-pipeline = VigilAIPipeline()
-
-
-# ============================================================
-# JSON SERIALIZATION
-# ============================================================
-
-def make_json_safe(value: Any) -> Any:
+class SpeakerVerifier:
     """
-    Convert NumPy/Python objects into JSON-safe values.
+    VIGIL speaker verification engine.
+
+    The current implementation uses deterministic acoustic
+    features to create a lightweight speaker representation.
+
+    No import from ai.pipeline is required here.
     """
 
-    if isinstance(value, dict):
-        return {
-            str(key): make_json_safe(item)
-            for key, item in value.items()
+    def __init__(
+        self,
+        match_threshold: float = 0.72
+    ):
+        self.match_threshold = match_threshold
+
+        # {
+        #     "speaker_id": {
+        #         "embedding": np.ndarray,
+        #         "metadata": {...}
+        #     }
+        # }
+        self.speaker_profiles: Dict[
+            str,
+            Dict[str, Any]
+        ] = {}
+
+    # ========================================================
+    # FEATURE EXTRACTION
+    # ========================================================
+
+    def extract_speaker_embedding(
+        self,
+        samples: np.ndarray,
+        sample_rate: int = 16000
+    ) -> np.ndarray:
+        """
+        Create a lightweight deterministic speaker embedding.
+
+        This is an MVP baseline based on acoustic characteristics.
+        It should not be described as a neural speaker embedding.
+
+        Returns a normalized vector.
+        """
+
+        samples = np.asarray(
+            samples,
+            dtype=np.float32
+        )
+
+        if len(samples) == 0:
+            return np.zeros(
+                32,
+                dtype=np.float32
+            )
+
+        samples = np.nan_to_num(
+            samples,
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0
+        )
+
+        samples = np.clip(
+            samples,
+            -1.0,
+            1.0
+        )
+
+        # ----------------------------------------------------
+        # Basic statistics
+        # ----------------------------------------------------
+
+        mean = float(
+            np.mean(samples)
+        )
+
+        std = float(
+            np.std(samples)
+        )
+
+        rms = float(
+            np.sqrt(
+                np.mean(
+                    np.square(samples)
+                )
+            )
+        )
+
+        abs_mean = float(
+            np.mean(
+                np.abs(samples)
+            )
+        )
+
+        peak = float(
+            np.max(
+                np.abs(samples)
+            )
+        )
+
+        # ----------------------------------------------------
+        # Zero crossing rate
+        # ----------------------------------------------------
+
+        if len(samples) > 1:
+
+            signs = np.sign(
+                samples
+            )
+
+            zcr = float(
+                np.mean(
+                    np.abs(
+                        np.diff(signs)
+                    ) > 0
+                )
+            )
+
+        else:
+
+            zcr = 0.0
+
+        # ----------------------------------------------------
+        # Spectral features
+        # ----------------------------------------------------
+
+        if len(samples) >= 256:
+
+            fft_size = min(
+                len(samples),
+                4096
+            )
+
+            working = samples[
+                :fft_size
+            ]
+
+            window = np.hanning(
+                len(working)
+            )
+
+            windowed = (
+                working * window
+            )
+
+            spectrum = np.abs(
+                np.fft.rfft(
+                    windowed
+                )
+            )
+
+            frequencies = np.fft.rfftfreq(
+                len(windowed),
+                d=1.0 / sample_rate
+            )
+
+            total_energy = float(
+                np.sum(spectrum)
+            ) + 1e-12
+
+            spectral_centroid = float(
+                np.sum(
+                    frequencies * spectrum
+                ) / total_energy
+            )
+
+            spectral_bandwidth = float(
+                np.sqrt(
+                    np.sum(
+                        (
+                            frequencies
+                            - spectral_centroid
+                        ) ** 2
+                        * spectrum
+                    )
+                    / total_energy
+                )
+            )
+
+            cumulative = np.cumsum(
+                spectrum
+            )
+
+            rolloff_threshold = (
+                0.85
+                * total_energy
+            )
+
+            rolloff_indices = np.where(
+                cumulative
+                >= rolloff_threshold
+            )[0]
+
+            if len(rolloff_indices) > 0:
+
+                spectral_rolloff = float(
+                    frequencies[
+                        rolloff_indices[0]
+                    ]
+                )
+
+            else:
+
+                spectral_rolloff = 0.0
+
+            # Low / mid / high spectral energy.
+            low_mask = (
+                frequencies < 1000
+            )
+
+            mid_mask = (
+                (frequencies >= 1000)
+                & (frequencies < 3000)
+            )
+
+            high_mask = (
+                frequencies >= 3000
+            )
+
+            low_energy = float(
+                np.sum(
+                    spectrum[low_mask]
+                )
+            ) / total_energy
+
+            mid_energy = float(
+                np.sum(
+                    spectrum[mid_mask]
+                )
+            ) / total_energy
+
+            high_energy = float(
+                np.sum(
+                    spectrum[high_mask]
+                )
+            ) / total_energy
+
+        else:
+
+            spectral_centroid = 0.0
+            spectral_bandwidth = 0.0
+            spectral_rolloff = 0.0
+            low_energy = 0.0
+            mid_energy = 0.0
+            high_energy = 0.0
+
+        # ----------------------------------------------------
+        # Frame-level statistics
+        # ----------------------------------------------------
+
+        frame_size = 512
+
+        frame_values: List[float] = []
+
+        for start in range(
+            0,
+            len(samples),
+            frame_size
+        ):
+
+            frame = samples[
+                start:start + frame_size
+            ]
+
+            if len(frame) < 64:
+                continue
+
+            frame_rms = float(
+                np.sqrt(
+                    np.mean(
+                        np.square(frame)
+                    )
+                )
+            )
+
+            frame_values.append(
+                frame_rms
+            )
+
+        if len(frame_values) > 1:
+
+            frame_rms_mean = float(
+                np.mean(frame_values)
+            )
+
+            frame_rms_std = float(
+                np.std(frame_values)
+            )
+
+        else:
+
+            frame_rms_mean = rms
+            frame_rms_std = 0.0
+
+        # ----------------------------------------------------
+        # Energy percentiles
+        # ----------------------------------------------------
+
+        abs_samples = np.abs(
+            samples
+        )
+
+        percentile_25 = float(
+            np.percentile(
+                abs_samples,
+                25
+            )
+        )
+
+        percentile_50 = float(
+            np.percentile(
+                abs_samples,
+                50
+            )
+        )
+
+        percentile_75 = float(
+            np.percentile(
+                abs_samples,
+                75
+            )
+        )
+
+        percentile_90 = float(
+            np.percentile(
+                abs_samples,
+                90
+            )
+        )
+
+        # ----------------------------------------------------
+        # Construct embedding
+        # ----------------------------------------------------
+
+        embedding = np.array(
+            [
+                mean,
+                std,
+                rms,
+                abs_mean,
+                peak,
+                zcr,
+
+                spectral_centroid / 8000.0,
+                spectral_bandwidth / 8000.0,
+                spectral_rolloff / 8000.0,
+
+                low_energy,
+                mid_energy,
+                high_energy,
+
+                frame_rms_mean,
+                frame_rms_std,
+
+                percentile_25,
+                percentile_50,
+                percentile_75,
+                percentile_90,
+
+                float(len(samples)) / (
+                    sample_rate * 10.0
+                ),
+
+                # Additional deterministic
+                # nonlinear acoustic features.
+                mean * mean,
+                std * std,
+                rms * rms,
+                abs_mean * abs_mean,
+                peak * peak,
+
+                zcr * zcr,
+
+                low_energy * mid_energy,
+                mid_energy * high_energy,
+                low_energy * high_energy,
+
+                spectral_centroid
+                * spectral_centroid
+                / (8000.0 ** 2),
+
+                spectral_bandwidth
+                * spectral_bandwidth
+                / (8000.0 ** 2),
+
+                spectral_rolloff
+                * spectral_rolloff
+                / (8000.0 ** 2),
+
+            ],
+            dtype=np.float32
+        )
+
+        # ----------------------------------------------------
+        # Normalize embedding
+        # ----------------------------------------------------
+
+        norm = float(
+            np.linalg.norm(
+                embedding
+            )
+        )
+
+        if norm > 1e-8:
+
+            embedding = (
+                embedding / norm
+            ).astype(np.float32)
+
+        else:
+
+            embedding = np.zeros(
+                len(embedding),
+                dtype=np.float32
+            )
+
+        return embedding
+
+    # ========================================================
+    # REGISTER SPEAKER
+    # ========================================================
+
+    def register_speaker(
+        self,
+        speaker_id: str,
+        samples: np.ndarray,
+        sample_rate: int = 16000,
+        metadata: Optional[
+            Dict[str, Any]
+        ] = None
+    ) -> Dict[str, Any]:
+        """
+        Enroll a trusted speaker profile.
+        """
+
+        if not speaker_id:
+            raise ValueError(
+                "speaker_id is required."
+            )
+
+        embedding = (
+            self.extract_speaker_embedding(
+                samples,
+                sample_rate
+            )
+        )
+
+        self.speaker_profiles[
+            speaker_id
+        ] = {
+            "embedding": embedding,
+            "metadata": metadata or {},
         }
 
-    if isinstance(value, list):
-        return [
-            make_json_safe(item)
-            for item in value
+        return {
+            "speaker_id": speaker_id,
+            "status": "ENROLLED",
+            "embedding_dimensions": int(
+                len(embedding)
+            ),
+            "message": (
+                "Speaker profile enrolled "
+                "successfully."
+            ),
+        }
+
+    # ========================================================
+    # DELETE SPEAKER
+    # ========================================================
+
+    def delete_speaker(
+        self,
+        speaker_id: str
+    ) -> bool:
+        """
+        Delete an enrolled speaker profile.
+        """
+
+        if speaker_id not in self.speaker_profiles:
+            return False
+
+        del self.speaker_profiles[
+            speaker_id
         ]
 
-    if isinstance(value, tuple):
-        return [
-            make_json_safe(item)
-            for item in value
-        ]
+        return True
 
-    if isinstance(value, np.ndarray):
-        return value.tolist()
+    # ========================================================
+    # LIST SPEAKERS
+    # ========================================================
 
-    if isinstance(value, np.floating):
-        return float(value)
+    def list_speakers(
+        self
+    ) -> List[Dict[str, Any]]:
+        """
+        Return enrolled speaker IDs and metadata.
+        """
 
-    if isinstance(value, np.integer):
-        return int(value)
+        profiles = []
 
-    if isinstance(value, np.bool_):
-        return bool(value)
+        for speaker_id, profile in (
+            self.speaker_profiles.items()
+        ):
 
-    if isinstance(value, float):
+            profiles.append({
+                "speaker_id": speaker_id,
+                "metadata": profile.get(
+                    "metadata",
+                    {}
+                ),
+            })
 
-        if np.isnan(value) or np.isinf(value):
+        return profiles
+
+    # ========================================================
+    # COSINE SIMILARITY
+    # ========================================================
+
+    def compute_similarity(
+        self,
+        embedding_a: np.ndarray,
+        embedding_b: np.ndarray
+    ) -> float:
+        """
+        Calculate cosine similarity between
+        two speaker embeddings.
+        """
+
+        embedding_a = np.asarray(
+            embedding_a,
+            dtype=np.float32
+        )
+
+        embedding_b = np.asarray(
+            embedding_b,
+            dtype=np.float32
+        )
+
+        if (
+            len(embedding_a) == 0
+            or len(embedding_b) == 0
+        ):
             return 0.0
 
-        return value
-
-    return value
-
-
-# ============================================================
-# RESPONSE FORMATTER
-# ============================================================
-
-def build_analysis_response(
-    result: Dict[str, Any],
-    session_id: Optional[str],
-    timestamp: Optional[str] = None
-) -> Dict[str, Any]:
-    """
-    Convert the internal pipeline result into the stable
-    WebSocket response schema expected by the frontend.
-    """
-
-    voice = result.get(
-        "voice_authenticity",
-        {}
-    )
-
-    speaker = result.get(
-        "speaker_verification",
-        {}
-    )
-
-    context = result.get(
-        "context_analysis",
-        {}
-    )
-
-    risk = result.get(
-        "risk_assessment",
-        {}
-    )
-
-    threat = result.get(
-        "threat_classification",
-        {}
-    )
-
-    transcription = result.get(
-        "transcription",
-        {}
-    )
-
-    transcript = result.get(
-        "transcript",
-        ""
-    )
-
-    if not transcript:
-        transcript = transcription.get(
-            "transcript",
-            ""
-        )
-
-    # --------------------------------------------------------
-    # Voice analysis
-    # --------------------------------------------------------
-
-    synthetic_probability = voice.get(
-        "synthetic_probability",
-        0.0
-    )
-
-    real_probability = voice.get(
-        "real_probability",
-        1.0
-    )
-
-    voice_confidence = voice.get(
-        "confidence",
-        0.0
-    )
-
-    voice_classification = voice.get(
-        "classification",
-        "UNCERTAIN"
-    )
-
-    if voice_classification == "SYNTHETIC":
-        voice_status = "suspicious"
-
-    elif voice_classification == "REAL":
-        voice_status = "likely_real"
-
-    else:
-        voice_status = "uncertain"
-
-    # --------------------------------------------------------
-    # Speaker analysis
-    # --------------------------------------------------------
-
-    speaker_similarity = speaker.get(
-        "similarity"
-    )
-
-    speaker_verified = speaker.get(
-        "verified"
-    )
-
-    speaker_status_raw = speaker.get(
-        "status",
-        "NOT_ENROLLED"
-    )
-
-    if speaker_status_raw == "MATCH":
-        speaker_status = "MATCH"
-
-    elif speaker_status_raw in (
-        "MISMATCH",
-        "NO_MATCH"
-    ):
-        speaker_status = "MISMATCH"
-
-    elif speaker_status_raw in (
-        "NOT_ENROLLED",
-        "UNKNOWN"
-    ):
-        speaker_status = "NOT_ENROLLED"
-
-    else:
-        speaker_status = str(
-            speaker_status_raw
-        )
-
-    # --------------------------------------------------------
-    # Context analysis
-    # --------------------------------------------------------
-
-    detected_signals = context.get(
-        "detected_signals",
-        []
-    )
-
-    detected_categories = []
-
-    if context.get(
-        "otp_request",
-        False
-    ):
-        detected_categories.append(
-            "OTP_REQUEST"
-        )
-
-    if context.get(
-        "money_request",
-        False
-    ):
-        detected_categories.append(
-            "MONEY_REQUEST"
-        )
-
-    if context.get(
-        "credential_request",
-        False
-    ):
-        detected_categories.append(
-            "CREDENTIAL_REQUEST"
-        )
-
-    if context.get(
-        "remote_access_request",
-        False
-    ):
-        detected_categories.append(
-            "REMOTE_ACCESS"
-        )
-
-    impersonation_context = context.get(
-        "impersonation_context",
-        ""
-    )
-
-    if impersonation_context:
-        detected_categories.append(
-            "IMPERSONATION"
-        )
-
-    # --------------------------------------------------------
-    # Risk
-    # --------------------------------------------------------
-
-    risk_score = risk.get(
-        "risk_score",
-        risk.get(
-            "score",
-            0
-        )
-    )
-
-    risk_level = risk.get(
-        "risk_level",
-        risk.get(
-            "level",
-            "LOW"
-        )
-    )
-
-    risk_factors = risk.get(
-        "contributing_factors",
-        risk.get(
-            "risk_factors",
-            []
-        )
-    )
-
-    recommendation = risk.get(
-        "recommendation",
-        ""
-    )
-
-    # --------------------------------------------------------
-    # Threat
-    # --------------------------------------------------------
-
-    threat_level = threat.get(
-        "threat_level",
-        risk_level
-    )
-
-    threat_categories = threat.get(
-        "categories",
-        threat.get(
-            "threats",
-            []
-        )
-    )
-
-    # --------------------------------------------------------
-    # Final response
-    # --------------------------------------------------------
-
-    response = {
-        "type": "analysis_update",
-
-        "session_id": session_id,
-
-        "timestamp": (
-            timestamp
-            or datetime.now(
-                timezone.utc
-            ).isoformat()
-        ),
-
-        "transcript": transcript,
-
-        "voice_analysis": {
-            "synthetic_probability": synthetic_probability,
-            "real_probability": real_probability,
-            "voice_status": voice_status,
-            "classification": voice_classification,
-            "confidence": voice_confidence,
-        },
-
-        "speaker_analysis": {
-            "speaker_match": speaker_similarity,
-            "verified": speaker_verified,
-            "status": speaker_status,
-            "confidence": speaker.get(
-                "confidence",
-                0.0
-            ),
-        },
-
-        "context_analysis": {
-            "context_risk": context.get(
-                "social_engineering_score",
-                0.0
-            ),
-            "risk_factors": risk_factors,
-            "detected_categories": detected_categories,
-            "detected_signals": detected_signals,
-            "impersonation_context": impersonation_context,
-            "otp_request": context.get(
-                "otp_request",
-                False
-            ),
-            "money_request": context.get(
-                "money_request",
-                False
-            ),
-            "credential_request": context.get(
-                "credential_request",
-                False
-            ),
-            "remote_access_request": context.get(
-                "remote_access_request",
-                False
-            ),
-        },
-
-        "risk": {
-            "score": risk_score,
-            "threat_level": risk_level,
-            "recommendation": recommendation,
-        },
-
-        "threat": {
-            "level": threat_level,
-            "categories": threat_categories,
-            "details": threat,
-        },
-    }
-
-    return make_json_safe(response)
-
-
-# ============================================================
-# AUDIO DECODER
-# ============================================================
-
-def decode_audio_payload(
-    audio_b64: str,
-    sample_rate: int = 16000,
-    channels: int = 1
-):
-    """
-    Decode base64 PCM16 audio received from the browser.
-    """
-
-    if not audio_b64:
-        return (
-            np.array(
-                [],
-                dtype=np.float32
-            ),
-            sample_rate,
-            {}
-        )
-
-    try:
-        audio_bytes = base64.b64decode(
-            audio_b64
-        )
-
-    except Exception as exc:
-        raise ValueError(
-            f"Invalid base64 audio data: {exc}"
-        ) from exc
-
-    samples, decoded_rate, metadata = (
-        pipeline.audio_processor.decode_pcm16(
-            audio_bytes,
-            sample_rate=sample_rate,
-            channels=channels
-        )
-    )
-
-    return (
-        samples,
-        decoded_rate,
-        metadata
-    )
-
-
-# ============================================================
-# TEXT-ONLY ANALYSIS
-# ============================================================
-
-def process_text_only(
-    text: str
-) -> Dict[str, Any]:
-    """
-    Analyze browser-provided speech recognition text.
-
-    No fake audio is generated here.
-
-    Voice/speaker analysis will remain unavailable because
-    this path contains no actual microphone samples.
-    """
-
-    transcript = (
-        text.strip()
-        if text
-        else ""
-    )
-
-    context_result = (
-        pipeline.context_analyzer
-        .analyze_transcript(
-            transcript
-        )
-    )
-
-    empty_voice_result = {
-        "real_probability": None,
-        "synthetic_probability": None,
-        "confidence": 0.0,
-        "classification": "UNCERTAIN",
-        "acoustic_features": {},
-        "status": "NO_AUDIO"
-    }
-
-    empty_speaker_result = {
-        "similarity": None,
-        "verified": None,
-        "status": "NOT_ENROLLED",
-        "confidence": 0.0,
-        "message": (
-            "Speaker verification requires "
-            "an enrolled speaker profile."
-        )
-    }
-
-    risk_result = (
-        pipeline.risk_engine.evaluate_risk(
-            empty_voice_result,
-            empty_speaker_result,
-            context_result
-        )
-    )
-
-    threat_result = (
-        pipeline.threat_classifier
-        .classify_threats(
-            risk_result,
-            empty_voice_result,
-            empty_speaker_result,
-            context_result
-        )
-    )
-
-    return {
-        "voice_authenticity": empty_voice_result,
-        "speaker_verification": empty_speaker_result,
-        "transcript": transcript,
-        "context_analysis": context_result,
-        "risk_assessment": risk_result,
-        "threat_classification": threat_result,
-    }
-
-
-# ============================================================
-# CONNECTION HANDLER
-# ============================================================
-
-async def handle_connection(
-    websocket: WebSocket
-):
-    """
-    Shared handler for both WebSocket endpoints.
-    """
-
-    await websocket.accept()
-
-    print(
-        "[WEBSOCKET] "
-        "VIGIL client connected."
-    )
-
-    session_id: Optional[str] = None
-    target_speaker_id: Optional[str] = None
-
-    try:
-
-        while True:
-
-            raw_message = (
-                await websocket.receive_text()
+        if (
+            len(embedding_a)
+            != len(embedding_b)
+        ):
+            return 0.0
+
+        norm_a = float(
+            np.linalg.norm(
+                embedding_a
             )
+        )
 
-            # ------------------------------------------------
-            # Parse JSON
-            # ------------------------------------------------
-
-            try:
-
-                payload = json.loads(
-                    raw_message
-                )
-
-            except json.JSONDecodeError:
-
-                await websocket.send_json({
-                    "type": "error",
-                    "message": (
-                        "Invalid JSON payload."
-                    )
-                })
-
-                continue
-
-            if not isinstance(
-                payload,
-                dict
-            ):
-
-                await websocket.send_json({
-                    "type": "error",
-                    "message": (
-                        "WebSocket payload "
-                        "must be a JSON object."
-                    )
-                })
-
-                continue
-
-            message_type = payload.get(
-                "type",
-                "audio_chunk"
+        norm_b = float(
+            np.linalg.norm(
+                embedding_b
             )
-
-            # ------------------------------------------------
-            # PING
-            # ------------------------------------------------
-
-            if message_type == "ping":
-
-                await websocket.send_json({
-                    "type": "pong",
-                    "status": "ACTIVE",
-                    "timestamp": datetime.now(
-                        timezone.utc
-                    ).isoformat()
-                })
-
-                continue
-
-            # ------------------------------------------------
-            # START SESSION
-            # ------------------------------------------------
-
-            if message_type == "start_session":
-
-                session_id = (
-                    payload.get(
-                        "session_id"
-                    )
-                    or datetime.now(
-                        timezone.utc
-                    ).strftime(
-                        "%Y%m%d%H%M%S"
-                    )
-                )
-
-                target_speaker_id = (
-                    payload.get(
-                        "speaker_id"
-                    )
-                    or payload.get(
-                        "target_speaker_id"
-                    )
-                )
-
-                await websocket.send_json({
-                    "type": "session_started",
-                    "session_id": session_id,
-                    "status": "ACTIVE"
-                })
-
-                continue
-
-            # ------------------------------------------------
-            # STOP SESSION
-            # ------------------------------------------------
-
-            if message_type == "stop_session":
-
-                await websocket.send_json({
-                    "type": "session_stopped",
-                    "session_id": session_id,
-                    "status": "STOPPED"
-                })
-
-                session_id = None
-
-                continue
-
-            # ------------------------------------------------
-            # UPDATE SPEAKER
-            # ------------------------------------------------
-
-            if message_type == "set_speaker":
-
-                target_speaker_id = (
-                    payload.get(
-                        "speaker_id"
-                    )
-                    or payload.get(
-                        "target_speaker_id"
-                    )
-                )
-
-                await websocket.send_json({
-                    "type": "speaker_updated",
-                    "speaker_id": target_speaker_id
-                })
-
-                continue
-
-            # ------------------------------------------------
-            # TRANSCRIPT FROM BROWSER
-            # ------------------------------------------------
-
-            if message_type in (
-                "transcript",
-                "speech_text"
-            ):
-
-                text = payload.get(
-                    "text",
-                    ""
-                )
-
-                result = process_text_only(
-                    text
-                )
-
-                response = (
-                    build_analysis_response(
-                        result,
-                        session_id,
-                        payload.get(
-                            "timestamp"
-                        )
-                    )
-                )
-
-                await websocket.send_json(
-                    response
-                )
-
-                continue
-
-            # ------------------------------------------------
-            # AUDIO CHUNK
-            # ------------------------------------------------
-
-            if message_type in (
-                "audio_chunk",
-                "chunk",
-                "audio"
-            ):
-
-                audio_b64 = payload.get(
-                    "audio_b64",
-                    payload.get(
-                        "audio",
-                        ""
-                    )
-                )
-
-                if not audio_b64:
-
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": (
-                            "No audio data "
-                            "was provided."
-                        )
-                    })
-
-                    continue
-
-                sample_rate = int(
-                    payload.get(
-                        "sample_rate",
-                        16000
-                    )
-                )
-
-                channels = int(
-                    payload.get(
-                        "channels",
-                        1
-                    )
-                )
-
-                try:
-
-                    samples, decoded_rate, metadata = (
-                        decode_audio_payload(
-                            audio_b64,
-                            sample_rate=sample_rate,
-                            channels=channels
-                        )
-                    )
-
-                except Exception as exc:
-
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": (
-                            f"Audio decoding failed: {exc}"
-                        )
-                    })
-
-                    continue
-
-                if len(samples) == 0:
-
-                    await websocket.send_json({
-                        "type": "audio_status",
-                        "status": "NO_AUDIO",
-                        "session_id": session_id
-                    })
-
-                    continue
-
-                # --------------------------------------------
-                # Run actual VIGIL AI pipeline
-                # --------------------------------------------
-
-                browser_transcript = payload.get(
-                    "text"
-                )
-
-                result = pipeline.process_audio_chunk(
-                    chunk_samples=samples,
-                    sample_rate=decoded_rate,
-                    target_speaker_id=(
-                        target_speaker_id
-                    ),
-                    custom_text=(
-                        browser_transcript
-                        if browser_transcript
-                        else None
-                    )
-                )
-
-                response = (
-                    build_analysis_response(
-                        result,
-                        session_id,
-                        payload.get(
-                            "timestamp"
-                        )
-                    )
-                )
-
-                # Include basic processing metadata.
-                response["audio"] = {
-                    "sample_rate": decoded_rate,
-                    "channels": metadata.get(
-                        "channels",
-                        channels
-                    ),
-                    "duration": metadata.get(
-                        "duration",
-                        0.0
-                    ),
-                    "rms_energy": metadata.get(
-                        "rms_energy",
-                        0.0
-                    ),
-                }
-
-                await websocket.send_json(
-                    make_json_safe(
-                        response
-                    )
-                )
-
-                continue
-
-            # ------------------------------------------------
-            # UNKNOWN MESSAGE
-            # ------------------------------------------------
-
-            await websocket.send_json({
-                "type": "error",
-                "message": (
-                    f"Unsupported message type: "
-                    f"{message_type}"
-                )
-            })
-
-    except WebSocketDisconnect:
-
-        print(
-            "[WEBSOCKET] "
-            "Client disconnected."
         )
 
-    except Exception as exc:
+        if (
+            norm_a <= 1e-8
+            or norm_b <= 1e-8
+        ):
+            return 0.0
 
-        print(
-            "[WEBSOCKET ERROR] "
-            f"{type(exc).__name__}: {exc}"
+        similarity = float(
+            np.dot(
+                embedding_a,
+                embedding_b
+            )
+            / (
+                norm_a * norm_b
+            )
         )
 
-        try:
+        # Numerical safety.
+        similarity = max(
+            -1.0,
+            min(
+                1.0,
+                similarity
+            )
+        )
 
-            await websocket.send_json({
-                "type": "error",
+        # Convert [-1, 1] to [0, 1].
+        similarity = (
+            similarity + 1.0
+        ) / 2.0
+
+        return round(
+            similarity,
+            4
+        )
+
+    # ========================================================
+    # VERIFY SPEAKER
+    # ========================================================
+
+    def verify_speaker(
+        self,
+        speaker_id: str,
+        samples: np.ndarray,
+        sample_rate: int = 16000
+    ) -> Dict[str, Any]:
+        """
+        Compare incoming audio against an enrolled speaker.
+        """
+
+        if not speaker_id:
+
+            return {
+                "similarity": None,
+                "verified": None,
+                "status": "NOT_ENROLLED",
+                "confidence": 0.0,
                 "message": (
-                    "Internal WebSocket processing error."
+                    "No trusted speaker profile "
+                    "was selected."
+                ),
+            }
+
+        if (
+            speaker_id
+            not in self.speaker_profiles
+        ):
+
+            return {
+                "similarity": None,
+                "verified": None,
+                "status": "NOT_ENROLLED",
+                "confidence": 0.0,
+                "message": (
+                    f"Speaker profile "
+                    f"'{speaker_id}' was not found."
+                ),
+            }
+
+        incoming_embedding = (
+            self.extract_speaker_embedding(
+                samples,
+                sample_rate
+            )
+        )
+
+        stored_embedding = (
+            self.speaker_profiles[
+                speaker_id
+            ]["embedding"]
+        )
+
+        similarity = (
+            self.compute_similarity(
+                incoming_embedding,
+                stored_embedding
+            )
+        )
+
+        verified = (
+            similarity
+            >= self.match_threshold
+        )
+
+        if verified:
+
+            status = "MATCH"
+
+        else:
+
+            status = "MISMATCH"
+
+        # Similarity itself is used as a
+        # simple confidence indicator.
+        confidence = round(
+            max(
+                0.0,
+                min(
+                    1.0,
+                    similarity
                 )
-            })
+            ),
+            4
+        )
 
-        except Exception:
-            pass
-
-
-# ============================================================
-# WEBSOCKET ENDPOINTS
-# ============================================================
-
-@router.websocket("/ws/analyze")
-async def websocket_analyze_stream(
-    websocket: WebSocket
-):
-    """
-    General VIGIL real-time analysis endpoint.
-    """
-
-    await handle_connection(
-        websocket
-    )
-
-
-@router.websocket("/ws/live-monitor")
-async def websocket_live_monitor(
-    websocket: WebSocket
-):
-    """
-    Endpoint used by the VIGIL Live Monitor frontend.
-    """
-
-    await handle_connection(
-        websocket
-    )
+        return {
+            "similarity": similarity,
+            "verified": verified,
+            "status": status,
+            "confidence": confidence,
+            "threshold": self.match_threshold,
+            "speaker_id": speaker_id,
+        }
