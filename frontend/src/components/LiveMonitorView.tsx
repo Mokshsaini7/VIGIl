@@ -913,23 +913,21 @@ export const LiveMonitorView: React.FC = () => {
           const chunkSize = 0x8000;
 
           for (
-            let i = 0;
-            i < bytes.length;
-            i += chunkSize
-          ) {
-            const chunk =
-              bytes.subarray(
-                i,
-                Math.min(
-                  i + chunkSize,
-                  bytes.length
-                )
-              );
+  let i = 0;
+  i < bytes.length;
+  i += chunkSize
+) {
+  const end = Math.min(
+    i + chunkSize,
+    bytes.length
+  );
 
-            binary += String.fromCharCode(
-              ...chunk
-            );
-          }
+  for (let j = i; j < end; j++) {
+    binary += String.fromCharCode(
+      bytes[j]
+    );
+  }
+}
 
           const base64 =
             btoa(binary);
