@@ -28,7 +28,7 @@ export const LiveMonitorView: React.FC = () => {
 
   // Fetch real speaker profiles from backend
   useEffect(() => {
-    fetch('http://https://vigil-backend-bbwj.onrender.com/api/speaker/profiles')
+    fetch('http://://vigil-backend-bbwj.onrender.com/api/speaker/profiles')
       .then(res => res.json())
       .then(data => {
         setSpeakerProfiles(data);
