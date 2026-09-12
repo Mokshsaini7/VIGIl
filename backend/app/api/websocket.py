@@ -5,166 +5,258 @@ Endpoints:
     /ws/analyze
     /ws/live-monitor
 
-Receives:
-    - Real microphone audio chunks
-    - Live transcript text
-    - Session/control messages
-
-Returns:
-    - Voice analysis
-    - Conversation/context analysis
-    - Risk score
-    - Threat level
-    - Security recommendation
-
-IMPORTANT:
-This module does NOT generate fake/synthetic microphone data.
+Protocol:
+    JSON messages containing PCM16 audio encoded as base64.
 """
 
 import base64
 import json
 import uuid
 from datetime import datetime, timezone
+from typing import Any, Dict
 
 import numpy as np
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
+from fastapi import (
+    APIRouter,
+    WebSocket,
+    WebSocketDisconnect,
+)
 
 from ai.pipeline import VigilAIPipeline
 
 
 router = APIRouter()
 
-# Load the VIGIL AI pipeline once.
 pipeline = VigilAIPipeline()
 
 
-def safe_float(value, default=0.0):
-    """
-    Safely convert a value to float.
-    """
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
+def make_json_safe(value: Any) -> Any:
+
+    if isinstance(value, dict):
+        return {
+            key: make_json_safe(item)
+            for key, item in value.items()
+        }
+
+    if isinstance(value, list):
+        return [
+            make_json_safe(item)
+            for item in value
+        ]
+
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+
+    if isinstance(value, np.generic):
+        return value.item()
+
+    return value
 
 
-def clamp(value, minimum=0.0, maximum=1.0):
-    """
-    Keep a numeric value inside a safe range.
-    """
-    return max(
-        minimum,
-        min(maximum, value)
+def build_response(
+    session_id: str,
+    result: Dict[str, Any],
+    transcript: str,
+) -> Dict[str, Any]:
+
+    voice = result.get(
+        "voice_authenticity",
+        {}
     )
 
+    speaker = result.get(
+        "speaker_verification",
+        {}
+    )
 
-def make_timestamp():
-    """
-    UTC timestamp for WebSocket responses.
-    """
-    return datetime.now(
-        timezone.utc
-    ).isoformat()
+    context = result.get(
+        "context_analysis",
+        {}
+    )
 
+    risk = result.get(
+        "risk_assessment",
+        {}
+    )
 
-def normalize_result(result):
-    """
-    Convert pipeline output into a JSON-safe dictionary.
+    threat = result.get(
+        "threat_classification",
+        {}
+    )
 
-    The existing pipeline may return numpy values.
-    Those values cannot always be serialized directly
-    by FastAPI.
-    """
+    return make_json_safe({
 
-    if result is None:
-        return {}
+        "type": "analysis_update",
 
-    if isinstance(result, dict):
-        normalized = {}
+        "session_id": session_id,
 
-        for key, value in result.items():
+        "timestamp": datetime.now(
+            timezone.utc
+        ).isoformat(),
 
-            if isinstance(
-                value,
-                np.generic
-            ):
-                normalized[key] = value.item()
+        "transcript": transcript,
 
-            elif isinstance(
-                value,
-                np.ndarray
-            ):
-                normalized[key] = value.tolist()
-
-            elif isinstance(
-                value,
-                dict
-            ):
-                normalized[key] = normalize_result(
-                    value
+        "voice_analysis": {
+            "synthetic_probability": (
+                voice.get(
+                    "synthetic_probability",
+                    0.0
                 )
+            ),
+            "real_probability": (
+                voice.get(
+                    "real_probability",
+                    0.0
+                )
+            ),
+            "voice_status": (
+                voice.get(
+                    "classification",
+                    "INSUFFICIENT_AUDIO"
+                )
+            ),
+            "confidence": (
+                voice.get(
+                    "confidence",
+                    0.0
+                )
+            ),
+            "acoustic_features": (
+                voice.get(
+                    "acoustic_features",
+                    {}
+                )
+            ),
+        },
 
-            elif isinstance(
-                value,
-                list
-            ):
-                normalized[key] = [
-                    (
-                        item.item()
-                        if isinstance(
-                            item,
-                            np.generic
-                        )
-                        else item
-                    )
-                    for item in value
-                ]
+        "speaker_analysis": {
+            "speaker_match": (
+                speaker.get(
+                    "similarity"
+                )
+            ),
+            "status": (
+                speaker.get(
+                    "status",
+                    "NOT_ENROLLED"
+                )
+            ),
+            "verified": (
+                speaker.get(
+                    "verified"
+                )
+            ),
+            "confidence": (
+                speaker.get(
+                    "confidence",
+                    0.0
+                )
+            ),
+            "speaker_id": (
+                speaker.get(
+                    "speaker_id"
+                )
+            ),
+            "speaker_name": (
+                speaker.get(
+                    "speaker_name"
+                )
+            ),
+        },
 
-            else:
-                normalized[key] = value
+        "context_analysis": {
+            "context_risk": (
+                context.get(
+                    "threat_score",
+                    0.0
+                )
+            ),
+            "social_engineering_score": (
+                context.get(
+                    "social_engineering_score",
+                    0.0
+                )
+            ),
+            "risk_factors": (
+                context.get(
+                    "detected_signals",
+                    []
+                )
+            ),
+            "detected_categories": [
+                key
+                for key in (
+                    "otp_request",
+                    "money_request",
+                    "credential_request",
+                    "remote_access_request",
+                )
+                if context.get(key)
+            ],
+            "impersonation_context": (
+                context.get(
+                    "impersonation_context",
+                    "NONE"
+                )
+            ),
+            "urgency_score": (
+                context.get(
+                    "urgency_score",
+                    0.0
+                )
+            ),
+            "secrecy_score": (
+                context.get(
+                    "secrecy_score",
+                    0.0
+                )
+            ),
+        },
 
-        return normalized
+        "risk": {
+            "score": risk.get(
+                "risk_score",
+                0
+            ),
+            "threat_level": risk.get(
+                "risk_level",
+                "LOW"
+            ),
+            "contributing_factors": risk.get(
+                "contributing_factors",
+                []
+            ),
+        },
 
-    if isinstance(
-        result,
-        np.generic
-    ):
-        return result.item()
-
-    return result
-
-
-def get_value(
-    data,
-    possible_keys,
-    default=None
-):
-    """
-    Retrieve the first available key from a dictionary.
-    """
-    if not isinstance(data, dict):
-        return default
-
-    for key in possible_keys:
-        if key in data:
-            return data[key]
-
-    return default
+        "threat": {
+            "categories": threat.get(
+                "threat_categories",
+                []
+            ),
+            "primary_threat": threat.get(
+                "primary_threat",
+                "SAFE"
+            ),
+            "recommendation": threat.get(
+                "recommended_action",
+                "Continue with standard caution."
+            ),
+            "action_code": threat.get(
+                "action_code",
+                "PROCEED_NORMAL"
+            ),
+            "requires_immediate_action": threat.get(
+                "requires_immediate_action",
+                False
+            ),
+        },
+    })
 
 
 async def handle_connection(
     websocket: WebSocket
 ):
-    """
-    Shared WebSocket implementation.
-
-    Both:
-
-        /ws/analyze
-        /ws/live-monitor
-
-    use this handler.
-    """
 
     await websocket.accept()
 
@@ -172,586 +264,261 @@ async def handle_connection(
         uuid.uuid4()
     )
 
+    transcript = ""
+
     target_speaker_id = None
 
     print(
-        f"[VIGIL WS] Client connected. "
-        f"Session={session_id}"
-    )
-
-    # ---------------------------------------------------------
-    # Send connection confirmation
-    # ---------------------------------------------------------
-
-    await websocket.send_json(
-        {
-            "type": "ready",
-            "session_id": session_id,
-            "status": "CONNECTED",
-            "timestamp": make_timestamp(),
-        }
+        f"[VIGIL WS] Connected: {session_id}"
     )
 
     try:
 
+        await websocket.send_json({
+            "type": "session_started",
+            "session_id": session_id,
+            "status": "ACTIVE",
+        })
+
         while True:
 
-            message = await websocket.receive()
-
-            # =================================================
-            # BINARY MESSAGE
-            # =================================================
-
-            if message.get("bytes") is not None:
-
-                audio_bytes = message["bytes"]
-
-                if not audio_bytes:
-                    continue
-
-                print(
-                    f"[VIGIL WS] Received binary "
-                    f"audio: {len(audio_bytes)} bytes"
-                )
-
-                /*
-                Binary audio is acknowledged here.
-                The browser implementation currently
-                sends audio as base64 JSON, so this
-                branch is primarily for future raw
-                WebSocket audio support.
-                */
-
-                await websocket.send_json(
-                    {
-                        "type": "audio_received",
-                        "session_id": session_id,
-                        "bytes_received": len(
-                            audio_bytes
-                        ),
-                        "timestamp": make_timestamp(),
-                    }
-                )
-
-                continue
-
-            # =================================================
-            # TEXT MESSAGE
-            # =================================================
-
-            data_text = message.get("text")
-
-            if not data_text:
-                continue
+            raw_message = (
+                await websocket.receive_text()
+            )
 
             try:
+
                 payload = json.loads(
-                    data_text
+                    raw_message
                 )
 
             except json.JSONDecodeError:
 
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "session_id": session_id,
-                        "error": "Invalid JSON payload.",
-                    }
-                )
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Invalid JSON payload.",
+                })
 
                 continue
 
-            if not isinstance(
-                payload,
-                dict
-            ):
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "session_id": session_id,
-                        "error": "WebSocket payload must be a JSON object.",
-                    }
-                )
-
-                continue
-
-            # -------------------------------------------------
-            # Message information
-            # -------------------------------------------------
-
-            msg_type = payload.get(
+            message_type = payload.get(
                 "type",
                 "audio_chunk"
             )
 
-            target_speaker_id = (
-                payload.get(
-                    "target_speaker_id"
-                )
-                or payload.get(
-                    "speaker_id"
-                )
-                or target_speaker_id
-            )
-
-            custom_text = payload.get(
-                "text"
-            )
-
-            # =================================================
+            # ----------------------------------------
             # PING
-            # =================================================
+            # ----------------------------------------
 
-            if msg_type == "ping":
+            if message_type == "ping":
 
-                await websocket.send_json(
-                    {
-                        "type": "pong",
-                        "session_id": session_id,
-                        "status": "ACTIVE",
-                        "timestamp": make_timestamp(),
-                    }
-                )
+                await websocket.send_json({
+                    "type": "pong",
+                    "status": "ACTIVE",
+                    "session_id": session_id,
+                })
 
                 continue
 
-            # =================================================
+            # ----------------------------------------
             # START SESSION
-            # =================================================
+            # ----------------------------------------
 
-            if msg_type in {
-                "start",
-                "start_session"
-            }:
+            if message_type == "start_session":
 
                 target_speaker_id = (
                     payload.get(
-                        "target_speaker_id"
-                    )
-                    or payload.get(
                         "speaker_id"
                     )
                 )
 
+                await websocket.send_json({
+                    "type": "session_started",
+                    "session_id": session_id,
+                    "status": "ACTIVE",
+                    "speaker_id": target_speaker_id,
+                })
+
+                continue
+
+            # ----------------------------------------
+            # TRANSCRIPT UPDATE
+            # ----------------------------------------
+
+            if message_type in (
+                "transcript",
+                "speech",
+            ):
+
+                incoming_text = (
+                    payload.get(
+                        "text",
+                        ""
+                    )
+                    .strip()
+                )
+
+                if incoming_text:
+
+                    transcript = incoming_text
+
+                result = pipeline.process_audio_chunk(
+                    np.zeros(
+                        16000,
+                        dtype=np.float32
+                    ),
+                    16000,
+                    target_speaker_id,
+                    transcript,
+                )
+
+                response = build_response(
+                    session_id,
+                    result,
+                    transcript,
+                )
+
                 await websocket.send_json(
-                    {
-                        "type": "session_started",
-                        "session_id": session_id,
-                        "target_speaker_id":
-                            target_speaker_id,
-                        "status": "LISTENING",
-                        "timestamp": make_timestamp(),
-                    }
+                    response
                 )
 
                 continue
 
-            # =================================================
-            # STOP SESSION
-            # =================================================
+            # ----------------------------------------
+            # AUDIO
+            # ----------------------------------------
 
-            if msg_type in {
-                "stop",
-                "stop_session"
-            }:
-
-                await websocket.send_json(
-                    {
-                        "type": "session_stopped",
-                        "session_id": session_id,
-                        "status": "STOPPED",
-                        "timestamp": make_timestamp(),
-                    }
-                )
-
-                break
-
-            # =================================================
-            # TRANSCRIPT ONLY
-            # =================================================
-
-            if msg_type == "transcript":
-
-                if not custom_text:
-                    continue
-
-                try:
-
-                    chunk_result = (
-                        pipeline.process_audio_chunk(
-                            chunk_samples=np.zeros(
-                                160,
-                                dtype=np.float32
-                            ),
-                            sample_rate=16000,
-                            target_speaker_id=
-                                target_speaker_id,
-                            custom_text=
-                                custom_text
-                        )
-                    )
-
-                    result = normalize_result(
-                        chunk_result
-                    )
-
-                    await websocket.send_json(
-                        {
-                            "type": "analysis_frame",
-                            "session_id": session_id,
-                            "timestamp":
-                                make_timestamp(),
-                            "transcript":
-                                custom_text,
-                            "results":
-                                result,
-                        }
-                    )
-
-                except Exception as error:
-
-                    print(
-                        "[VIGIL WS] "
-                        f"Transcript analysis error: {error}"
-                    )
-
-                    await websocket.send_json(
-                        {
-                            "type": "analysis_error",
-                            "session_id":
-                                session_id,
-                            "timestamp":
-                                make_timestamp(),
-                            "error":
-                                "Transcript analysis failed.",
-                        }
-                    )
-
-                continue
-
-            # =================================================
-            # AUDIO CHUNK
-            # =================================================
-
-            raw_audio_b64 = (
-                payload.get(
-                    "audio_b64"
-                )
-                or payload.get(
-                    "audio"
-                )
+            audio_b64 = payload.get(
+                "audio_b64",
+                ""
             )
 
-            if not raw_audio_b64:
-
-                /*
-                Do not generate fake audio.
-                */
-
-                if custom_text:
-
-                    try:
-
-                        chunk_result = (
-                            pipeline.process_audio_chunk(
-                                chunk_samples=np.zeros(
-                                    160,
-                                    dtype=np.float32
-                                ),
-                                sample_rate=16000,
-                                target_speaker_id=
-                                    target_speaker_id,
-                                custom_text=
-                                    custom_text
-                            )
-                        )
-
-                        result = normalize_result(
-                            chunk_result
-                        )
-
-                        await websocket.send_json(
-                            {
-                                "type":
-                                    "analysis_frame",
-                                "session_id":
-                                    session_id,
-                                "timestamp":
-                                    make_timestamp(),
-                                "transcript":
-                                    custom_text,
-                                "results":
-                                    result,
-                            }
-                        )
-
-                    except Exception as error:
-
-                        print(
-                            "[VIGIL WS] "
-                            f"Text-only processing error: {error}"
-                        )
+            if not audio_b64:
 
                 continue
-
-            # =================================================
-            # DECODE BASE64
-            # =================================================
 
             try:
 
                 audio_bytes = base64.b64decode(
-                    raw_audio_b64,
+                    audio_b64,
                     validate=True
                 )
 
-            except Exception as error:
+            except Exception:
 
-                print(
-                    "[VIGIL WS] "
-                    f"Invalid base64 audio: {error}"
-                )
-
-                await websocket.send_json(
-                    {
-                        "type":
-                            "analysis_error",
-                        "session_id":
-                            session_id,
-                        "timestamp":
-                            make_timestamp(),
-                        "error":
-                            "Invalid base64 audio data.",
-                    }
-                )
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Invalid base64 audio.",
+                })
 
                 continue
 
-            if not audio_bytes:
+            sample_rate = int(
+                payload.get(
+                    "sample_rate",
+                    16000
+                )
+            )
+
+            channels = int(
+                payload.get(
+                    "channels",
+                    1
+                )
+            )
+
+            samples, actual_rate, metadata = (
+                pipeline.audio_processor.decode_pcm16(
+                    audio_bytes,
+                    sample_rate,
+                    channels
+                )
+            )
+
+            if len(samples) == 0:
 
                 continue
 
-            # =================================================
-            # AUDIO PROCESSING
-            # =================================================
+            result = pipeline.process_audio_chunk(
+                samples,
+                actual_rate,
+                target_speaker_id,
+                transcript,
+            )
 
-            try:
+            response = build_response(
+                session_id,
+                result,
+                transcript,
+            )
 
-                extracted = (
-                    pipeline.audio_processor
-                    .extract_raw_pcm(
-                        audio_bytes
-                    )
-                )
+            response["audio"] = {
+                "duration": metadata.get(
+                    "duration",
+                    0.0
+                ),
+                "rms_energy": metadata.get(
+                    "rms_energy",
+                    0.0
+                ),
+            }
 
-                if not extracted:
-                    raise ValueError(
-                        "Audio processor returned no data."
-                    )
+            await websocket.send_json(
+                response
+            )
 
-                chunk_samples = None
-                sample_rate = 16000
-                metadata = {}
+            # ----------------------------------------
+            # STOP
+            # ----------------------------------------
 
-                # -------------------------------------------------
-                # Support tuple returned by current audio processor
-                # -------------------------------------------------
+            if message_type == "stop_session":
 
-                if isinstance(
-                    extracted,
-                    tuple
-                ):
+                await websocket.send_json({
+                    "type": "session_stopped",
+                    "session_id": session_id,
+                })
 
-                    if len(extracted) >= 1:
-                        chunk_samples = (
-                            extracted[0]
-                        )
-
-                    if len(extracted) >= 2:
-                        sample_rate = (
-                            extracted[1]
-                            or 16000
-                        )
-
-                    if len(extracted) >= 3:
-                        metadata = (
-                            extracted[2]
-                            or {}
-                        )
-
-                else:
-
-                    chunk_samples = extracted
-
-                if chunk_samples is None:
-                    raise ValueError(
-                        "No PCM samples extracted."
-                    )
-
-                chunk_samples = np.asarray(
-                    chunk_samples,
-                    dtype=np.float32
-                )
-
-                if chunk_samples.size == 0:
-                    raise ValueError(
-                        "Audio chunk contains no samples."
-                    )
-
-                # -------------------------------------------------
-                # Normalize audio safely
-                # -------------------------------------------------
-
-                max_abs = float(
-                    np.max(
-                        np.abs(
-                            chunk_samples
-                        )
-                    )
-                )
-
-                if max_abs > 1.0:
-
-                    chunk_samples = (
-                        chunk_samples /
-                        max_abs
-                    )
-
-                sample_rate = int(
-                    safe_float(
-                        sample_rate,
-                        16000
-                    )
-                )
-
-                # =================================================
-                # RUN VIGIL AI PIPELINE
-                # =================================================
-
-                chunk_result = (
-                    pipeline.process_audio_chunk(
-                        chunk_samples=
-                            chunk_samples,
-                        sample_rate=
-                            sample_rate,
-                        target_speaker_id=
-                            target_speaker_id,
-                        custom_text=
-                            custom_text
-                    )
-                )
-
-                result = normalize_result(
-                    chunk_result
-                )
-
-                # =================================================
-                # SEND ANALYSIS
-                # =================================================
-
-                await websocket.send_json(
-                    {
-                        "type":
-                            "analysis_frame",
-                        "session_id":
-                            session_id,
-                        "timestamp":
-                            payload.get(
-                                "timestamp"
-                            )
-                            or make_timestamp(),
-                        "audio_samples":
-                            int(
-                                chunk_samples.size
-                            ),
-                        "sample_rate":
-                            sample_rate,
-                        "results":
-                            result,
-                    }
-                )
-
-            except Exception as error:
-
-                print(
-                    "[VIGIL WS] "
-                    f"Audio processing error: {error}"
-                )
-
-                await websocket.send_json(
-                    {
-                        "type":
-                            "analysis_error",
-                        "session_id":
-                            session_id,
-                        "timestamp":
-                            make_timestamp(),
-                        "error":
-                            "Audio analysis failed.",
-                        "details":
-                            str(error),
-                    }
-                )
+                break
 
     except WebSocketDisconnect:
 
         print(
-            f"[VIGIL WS] Client disconnected. "
-            f"Session={session_id}"
+            f"[VIGIL WS] Disconnected: {session_id}"
         )
 
-    except Exception as error:
+    except Exception as exc:
 
         print(
-            f"[VIGIL WS] Unexpected error "
-            f"Session={session_id}: {error}"
+            f"[VIGIL WS ERROR] {session_id}: {exc}"
         )
 
         try:
 
-            await websocket.send_json(
-                {
-                    "type":
-                        "server_error",
-                    "session_id":
-                        session_id,
-                    "timestamp":
-                        make_timestamp(),
-                    "error":
-                        "VIGIL WebSocket server error.",
-                }
-            )
+            await websocket.send_json({
+                "type": "error",
+                "message": "Live analysis failed.",
+                "detail": str(exc),
+            })
 
         except Exception:
             pass
 
-        try:
-            await websocket.close()
-        except Exception:
-            pass
-
-
-# =============================================================
-# /ws/analyze
-# =============================================================
 
 @router.websocket("/ws/analyze")
-async def websocket_analyze_stream(
+async def websocket_analyze(
     websocket: WebSocket
 ):
+
     await handle_connection(
         websocket
     )
 
 
-# =============================================================
-# /ws/live-monitor
-# =============================================================
-
 @router.websocket("/ws/live-monitor")
-async def websocket_live_monitor_stream(
+async def websocket_live_monitor(
     websocket: WebSocket
 ):
+
     await handle_connection(
         websocket
     )
