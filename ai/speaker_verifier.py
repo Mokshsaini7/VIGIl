@@ -1,138 +1,252 @@
 """
 VIGIL — Module 3: Speaker Verification Engine
-Computes acoustic speaker embeddings (d-vectors) and evaluates cosine similarity 
-against enrolled reference profiles to detect speaker mismatch / identity impersonation.
+
+Provides acoustic speaker verification when a trusted speaker profile
+has been enrolled.
+
+No enrollment = NOT_ENROLLED, not a mismatch.
 """
 
+from typing import Dict, Any, List, Optional
+
 import numpy as np
-from typing import Dict, Any, List, Optional, Tuple
 
 
 class SpeakerVerifier:
-    """
-    Biometric voiceprint verification engine.
-    Extracts acoustic d-vector representations and performs similarity comparisons.
-    """
 
-    def __init__(self, match_threshold: float = 0.72):
+    def __init__(
+        self,
+        match_threshold: float = 0.72
+    ):
         self.match_threshold = match_threshold
-        # In-memory speaker profile database store
         self.speaker_profiles: Dict[str, Dict[str, Any]] = {}
 
-    def extract_speaker_embedding(self, samples: np.ndarray, sample_rate: int = 16000) -> np.ndarray:
-        """
-        Generates a normalized 128-dimensional acoustic embedding vector (d-vector).
-        Combines mel-scale spectral band energies and temporal cepstral statistical moments.
-        """
-        if len(samples) < 512:
-            return np.zeros(128, dtype=np.float32)
+    def extract_speaker_embedding(
+        self,
+        samples: np.ndarray,
+        sample_rate: int = 16000
+    ) -> np.ndarray:
 
-        # Segment into 16 spectral bins x 8 time slices = 128 dimensions
-        frame_len = len(samples) // 8
-        if frame_len < 64:
-            frame_len = len(samples)
+        if samples is None or len(samples) < 512:
+            return np.zeros(
+                128,
+                dtype=np.float32
+            )
+
+        frame_len = max(
+            len(samples) // 8,
+            64
+        )
 
         embedding = []
+
         for i in range(8):
+
             start = i * frame_len
-            end = min(start + frame_len, len(samples))
+            end = min(
+                start + frame_len,
+                len(samples)
+            )
+
             chunk = samples[start:end]
 
             if len(chunk) == 0:
-                embedding.extend([0.0] * 16)
+                embedding.extend(
+                    [0.0] * 16
+                )
                 continue
 
-            # Spectral energy across 16 mel-spaced log bands
-            fft_vals = np.abs(np.fft.rfft(chunk))
-            freq_bands = np.array_split(fft_vals, 16)
-            band_energies = [np.log1p(np.sum(band ** 2)) for band in freq_bands]
-            embedding.extend(band_energies)
+            fft_values = np.abs(
+                np.fft.rfft(chunk)
+            )
 
-        vec = np.array(embedding, dtype=np.float32)
-        norm = np.linalg.norm(vec)
+            bands = np.array_split(
+                fft_values,
+                16
+            )
+
+            energies = [
+                np.log1p(
+                    np.sum(band ** 2)
+                )
+                for band in bands
+            ]
+
+            embedding.extend(energies)
+
+        vector = np.array(
+            embedding,
+            dtype=np.float32
+        )
+
+        norm = np.linalg.norm(vector)
+
         if norm > 1e-6:
-            vec /= norm
-        return vec
+            vector /= norm
+
+        return vector
 
     def register_speaker(
-        self, speaker_id: str, name: str, audio_samples_list: List[np.ndarray], metadata: Optional[Dict[str, Any]] = None
+        self,
+        speaker_id: str,
+        name: str,
+        audio_samples_list: List[np.ndarray],
+        metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """
-        Enrolls a speaker by aggregating embeddings across provided audio samples.
-        """
-        embeddings = [self.extract_speaker_embedding(sample) for sample in audio_samples_list]
-        avg_embedding = np.mean(embeddings, axis=0)
-        norm = np.linalg.norm(avg_embedding)
-        if norm > 1e-6:
-            avg_embedding /= norm
 
-        profile = {
+        if not audio_samples_list:
+            raise ValueError(
+                "At least one audio sample is required."
+            )
+
+        embeddings = [
+            self.extract_speaker_embedding(sample)
+            for sample in audio_samples_list
+        ]
+
+        average = np.mean(
+            embeddings,
+            axis=0
+        )
+
+        norm = np.linalg.norm(
+            average
+        )
+
+        if norm > 1e-6:
+            average /= norm
+
+        self.speaker_profiles[speaker_id] = {
             "speaker_id": speaker_id,
             "name": name,
-            "sample_count": len(audio_samples_list),
-            "embedding": avg_embedding.tolist(),
-            "metadata": metadata or {}
+            "sample_count": len(
+                audio_samples_list
+            ),
+            "embedding": average.tolist(),
+            "metadata": metadata or {},
         }
-
-        self.speaker_profiles[speaker_id] = profile
 
         return {
             "speaker_id": speaker_id,
             "name": name,
             "registered": True,
-            "sample_count": len(audio_samples_list),
-            "status": "ENROLLED"
+            "sample_count": len(
+                audio_samples_list
+            ),
+            "status": "ENROLLED",
         }
 
-    def compute_similarity(self, embedding_a: np.ndarray, embedding_b: np.ndarray) -> float:
-        """Computes cosine similarity between two normalized speaker embedding vectors."""
-        dot_product = float(np.dot(embedding_a, embedding_b))
-        norm_a = float(np.linalg.norm(embedding_a))
-        norm_b = float(np.linalg.norm(embedding_b))
+    def compute_similarity(
+        self,
+        embedding_a: np.ndarray,
+        embedding_b: np.ndarray
+    ) -> float:
+
+        norm_a = np.linalg.norm(
+            embedding_a
+        )
+
+        norm_b = np.linalg.norm(
+            embedding_b
+        )
 
         if norm_a < 1e-6 or norm_b < 1e-6:
             return 0.0
 
-        similarity = dot_product / (norm_a * norm_b)
-        return float(np.clip(similarity, 0.0, 1.0))
+        similarity = float(
+            np.dot(
+                embedding_a,
+                embedding_b
+            ) / (norm_a * norm_b)
+        )
+
+        return float(
+            np.clip(
+                similarity,
+                0.0,
+                1.0
+            )
+        )
 
     def verify_speaker(
-        self, speaker_id: str, samples: np.ndarray, sample_rate: int = 16000
+        self,
+        speaker_id: str,
+        samples: np.ndarray,
+        sample_rate: int = 16000
     ) -> Dict[str, Any]:
-        """
-        Verifies incoming audio against an enrolled speaker profile.
-        """
-        if speaker_id not in self.speaker_profiles:
+
+        if not speaker_id:
             return {
-                "similarity": 0.0,
-                "verified": False,
-                "status": "UNKNOWN",
+                "similarity": None,
+                "verified": None,
+                "status": "NOT_ENROLLED",
                 "confidence": 0.0,
-                "message": f"Speaker profile '{speaker_id}' not found in database."
+                "message": (
+                    "No trusted speaker profile selected."
+                ),
             }
 
-        ref_profile = self.speaker_profiles[speaker_id]
-        ref_embedding = np.array(ref_profile["embedding"], dtype=np.float32)
+        if speaker_id not in self.speaker_profiles:
+            return {
+                "similarity": None,
+                "verified": None,
+                "status": "NOT_ENROLLED",
+                "confidence": 0.0,
+                "message": (
+                    f"Speaker profile '{speaker_id}' "
+                    "is not enrolled."
+                ),
+            }
 
-        test_embedding = self.extract_speaker_embedding(samples, sample_rate)
-        similarity = self.compute_similarity(ref_embedding, test_embedding)
+        profile = self.speaker_profiles[
+            speaker_id
+        ]
 
-        # Scale similarity for robust metric reporting
-        scaled_sim = round(similarity, 2)
-        confidence = min(round(0.70 + (scaled_sim * 0.28), 2), 0.98)
+        reference = np.array(
+            profile["embedding"],
+            dtype=np.float32
+        )
 
-        if scaled_sim >= self.match_threshold:
-            status = "MATCH"
-            verified = True
-        else:
-            status = "MISMATCH"
-            verified = False
+        test_embedding = (
+            self.extract_speaker_embedding(
+                samples,
+                sample_rate
+            )
+        )
+
+        similarity = self.compute_similarity(
+            reference,
+            test_embedding
+        )
+
+        similarity = round(
+            similarity,
+            2
+        )
+
+        verified = (
+            similarity >= self.match_threshold
+        )
+
+        status = (
+            "MATCH"
+            if verified
+            else "MISMATCH"
+        )
+
+        confidence = round(
+            min(
+                0.70 + similarity * 0.28,
+                0.98
+            ),
+            2
+        )
 
         return {
-            "similarity": scaled_sim,
+            "similarity": similarity,
             "verified": verified,
             "status": status,
             "confidence": confidence,
             "speaker_id": speaker_id,
-            "speaker_name": ref_profile["name"]
+            "speaker_name": profile["name"],
         }
