@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 
 import { Sidebar } from '@/components/Sidebar';
 import { Header } from '@/components/Header';
@@ -18,14 +18,8 @@ import { LoginView } from '@/components/LoginView';
 import { SignupView } from '@/components/SignupView';
 
 export default function Home() {
-  // --------------------------------------------------
-  // ACTIVE TAB
-  // --------------------------------------------------
   const [activeTab, setActiveTab] = useState('overview');
 
-  // --------------------------------------------------
-  // AUTHENTICATION
-  // --------------------------------------------------
   const [authUser, setAuthUser] = useState<{
     username: string;
     role: string;
@@ -36,14 +30,9 @@ export default function Home() {
 
   const [initialized, setInitialized] = useState(false);
 
-  // --------------------------------------------------
-  // MOBILE SIDEBAR
-  // --------------------------------------------------
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
-  // --------------------------------------------------
-  // RESTORE LOGIN SESSION
-  // --------------------------------------------------
+  // Restore saved authentication session
   useEffect(() => {
     try {
       const token = localStorage.getItem('vigil_token');
@@ -55,7 +44,7 @@ export default function Home() {
         setAuthUser({
           username: userObj.username,
           role: userObj.role,
-          token: token,
+          token,
         });
       }
     } catch (error) {
@@ -65,18 +54,13 @@ export default function Home() {
     setInitialized(true);
   }, []);
 
-  // --------------------------------------------------
-  // CHANGE TAB
-  // Also closes mobile sidebar
-  // --------------------------------------------------
+  // Change active tab
   const handleSetActiveTab = (tab: string) => {
     setActiveTab(tab);
     setIsMobileSidebarOpen(false);
   };
 
-  // --------------------------------------------------
-  // LOGOUT
-  // --------------------------------------------------
+  // Logout
   const handleLogout = () => {
     localStorage.removeItem('vigil_token');
     localStorage.removeItem('vigil_user');
@@ -86,9 +70,7 @@ export default function Home() {
     setIsMobileSidebarOpen(false);
   };
 
-  // --------------------------------------------------
-  // LOGIN / SIGNUP SUCCESS
-  // --------------------------------------------------
+  // Login / signup success
   const handleAuthSuccess = (user: {
     username: string;
     role: string;
@@ -99,9 +81,7 @@ export default function Home() {
     setIsMobileSidebarOpen(false);
   };
 
-  // --------------------------------------------------
-  // INITIAL LOADING
-  // --------------------------------------------------
+  // Loading state
   if (!initialized) {
     return (
       <div className="min-h-screen w-full bg-[#0B0F17] flex items-center justify-center text-gray-400">
@@ -118,9 +98,7 @@ export default function Home() {
     );
   }
 
-  // --------------------------------------------------
-  // LOGIN / SIGNUP
-  // --------------------------------------------------
+  // Authentication
   if (!authUser) {
     if (authMode === 'login') {
       return (
@@ -139,9 +117,7 @@ export default function Home() {
     );
   }
 
-  // --------------------------------------------------
-  // PAGE TITLE
-  // --------------------------------------------------
+  // Page title
   const getTabTitle = (tab: string) => {
     switch (tab) {
       case 'overview':
@@ -179,9 +155,7 @@ export default function Home() {
     }
   };
 
-  // --------------------------------------------------
-  // RENDER ACTIVE VIEW
-  // --------------------------------------------------
+  // Render current page
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':
@@ -212,8 +186,6 @@ export default function Home() {
       case 'demo-mode':
         return <DemoModeView />;
 
-      // These pages don't currently have
-      // dedicated view components.
       case 'analytics':
       case 'settings':
       default:
@@ -225,53 +197,27 @@ export default function Home() {
     }
   };
 
-  // --------------------------------------------------
-  // MAIN APPLICATION
-  // --------------------------------------------------
   return (
     <div className="min-h-screen w-full bg-[#0B0F17] text-gray-100 overflow-x-hidden">
 
-      {/* ================================================
-          MOBILE SIDEBAR BACKDROP
-          ================================================ */}
+      {/* Mobile sidebar overlay */}
       {isMobileSidebarOpen && (
         <button
           type="button"
           aria-label="Close navigation menu"
           onClick={() => setIsMobileSidebarOpen(false)}
-          className="
-            fixed
-            inset-0
-            z-40
-            bg-black/60
-            backdrop-blur-sm
-            lg:hidden
-          "
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
         />
       )}
 
-      {/* ================================================
-          APPLICATION LAYOUT
-          ================================================ */}
       <div className="flex min-h-screen w-full">
 
-        {/* ================================================
-            SIDEBAR
-            ================================================ */}
+        {/* Sidebar */}
         <div
           className={`
-            fixed
-            inset-y-0
-            left-0
-            z-50
-
-            w-[280px]
-            max-w-[85vw]
-
-            transform
-            transition-transform
-            duration-300
-            ease-in-out
+            fixed inset-y-0 left-0 z-50
+            w-[280px] max-w-[85vw]
+            transform transition-transform duration-300 ease-in-out
 
             lg:relative
             lg:translate-x-0
@@ -295,14 +241,10 @@ export default function Home() {
           />
         </div>
 
-        {/* ================================================
-            MAIN CONTENT AREA
-            ================================================ */}
+        {/* Main application */}
         <div className="flex min-w-0 flex-1 flex-col">
 
-          {/* ================================================
-              HEADER
-              ================================================ */}
+          {/* Header */}
           <Header
             title={getTabTitle(activeTab)}
             user={authUser}
@@ -314,17 +256,8 @@ export default function Home() {
             }
           />
 
-          {/* ================================================
-              PAGE CONTENT
-              ================================================ */}
-          <main
-            className="
-              min-w-0
-              flex-1
-              w-full
-              overflow-x-hidden
-            "
-          >
+          {/* Page content */}
+          <main className="min-w-0 flex-1 w-full overflow-x-hidden">
             {renderContent()}
           </main>
 
