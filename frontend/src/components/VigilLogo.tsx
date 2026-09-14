@@ -52,7 +52,7 @@ export const VigilLogo: React.FC<VigilLogoProps> = ({
       className={`flex items-center min-w-0 ${className}`}
     >
       <img
-        src="/VIGIL.png"
+        src="public/VIGIL.png"
         alt="VIGIL — Voice Integrity & Impersonation Guard"
         className={`
           ${sizes.image}
