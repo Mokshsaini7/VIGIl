@@ -3,7 +3,11 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'VIGIL — Voice Integrity & Impersonation Guard',
-  description: 'AI-Powered Voice Security & Impersonation Defense System for Smart India Hackathon 2026',
+  description:
+    'AI-Powered Voice Security & Impersonation Defense System for Smart India Hackathon 2026',
+  icons: {
+    icon: '/icon.png',
+  },
 };
 
 export default function RootLayout({
