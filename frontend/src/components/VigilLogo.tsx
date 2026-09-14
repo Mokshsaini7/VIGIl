@@ -3,33 +3,34 @@
 import React from 'react';
 import Image from 'next/image';
 
-interface LogoViewProps {
+interface VigilLogoProps {
   size?: number;
   className?: string;
 }
 
-export const LogoView: React.FC<LogoViewProps> = ({
+const VigilLogo: React.FC<VigilLogoProps> = ({
   size = 42,
   className = '',
 }) => {
   return (
     <div
-      className={`flex items-center justify-center shrink-0 ${className}`}
+      className={`relative flex items-center justify-center shrink-0 ${className}`}
       style={{
-        width: size,
-        height: size,
+        width: `${size}px`,
+        height: `${size}px`,
       }}
     >
       <Image
-        src="public/VIGIL.png"
-        alt="VIGIL Logo"
+        src="/VIGIL.png"
+        alt="VIGIL"
         width={size}
         height={size}
         priority
-        className="w-full h-full object-contain"
+        unoptimized
+        className="block w-full h-full object-contain"
       />
     </div>
   );
 };
 
-export default LogoView;
+export default VigilLogo;
