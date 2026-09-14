@@ -13,98 +13,347 @@ import { ThreatIntelView } from '@/components/ThreatIntelView';
 import { AlertsView } from '@/components/AlertsView';
 import { SessionsView } from '@/components/SessionsView';
 import { DemoModeView } from '@/components/DemoModeView';
+import { AnalyticsView } from '@/components/AnalyticsView';
+import { SettingsView } from '@/components/SettingsView';
 
 import { LoginView } from '@/components/LoginView';
 import { SignupView } from '@/components/SignupView';
 
+/* =========================================================
+   USER TYPE
+   ========================================================= */
+
+export type AuthUser = {
+  id?: number | string;
+  username: string;
+  email?: string;
+  role: string;
+  is_active?: boolean;
+  token: string;
+};
+
+/* =========================================================
+   API HOST
+   ========================================================= */
+
+const API_HOST =
+  process.env.NEXT_PUBLIC_API_URL ||
+  'http://localhost:8000';
+
+/* =========================================================
+   HOME
+   ========================================================= */
+
 export default function Home() {
-  const [activeTab, setActiveTab] = useState('overview');
+  /* -------------------------------------------------------
+     ACTIVE TAB
+  ------------------------------------------------------- */
 
-  const [authUser, setAuthUser] = useState<{
-    username: string;
-    role: string;
-    token: string;
-  } | null>(null);
+  const [activeTab, setActiveTab] =
+    useState('overview');
 
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  /* -------------------------------------------------------
+     AUTHENTICATION
+  ------------------------------------------------------- */
 
-  const [initialized, setInitialized] = useState(false);
+  const [authUser, setAuthUser] =
+    useState<AuthUser | null>(null);
 
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [authMode, setAuthMode] =
+    useState<'login' | 'signup'>('login');
 
-  // Restore saved authentication session
-  useEffect(() => {
+  const [initialized, setInitialized] =
+    useState(false);
+
+  /* -------------------------------------------------------
+     MOBILE SIDEBAR
+  ------------------------------------------------------- */
+
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] =
+    useState(false);
+
+  /* =======================================================
+     LOGOUT
+  ======================================================= */
+
+  const handleLogout = () => {
     try {
-      const token = localStorage.getItem('vigil_token');
-      const userStr = localStorage.getItem('vigil_user');
-
-      if (token && userStr) {
-        const userObj = JSON.parse(userStr);
-
-        setAuthUser({
-          username: userObj.username,
-          role: userObj.role,
-          token,
-        });
-      }
+      localStorage.removeItem('vigil_token');
+      localStorage.removeItem('vigil_user');
     } catch (error) {
-      console.error('Failed to restore VIGIL session:', error);
+      console.error(
+        'Failed to clear VIGIL session:',
+        error
+      );
     }
 
-    setInitialized(true);
+    setAuthUser(null);
+    setAuthMode('login');
+    setActiveTab('overview');
+    setIsMobileSidebarOpen(false);
+  };
+
+  /* =======================================================
+     RESTORE AUTHENTICATION
+  ======================================================= */
+
+  useEffect(() => {
+    const restoreSession = async () => {
+      try {
+        const token =
+          localStorage.getItem('vigil_token');
+
+        const userStr =
+          localStorage.getItem('vigil_user');
+
+        /* -----------------------------------------------
+           No saved session
+        ------------------------------------------------ */
+
+        if (!token || !userStr) {
+          setInitialized(true);
+          return;
+        }
+
+        let storedUser: any;
+
+        try {
+          storedUser = JSON.parse(userStr);
+        } catch {
+          console.warn(
+            'Invalid stored VIGIL user data.'
+          );
+
+          handleLogout();
+          setInitialized(true);
+          return;
+        }
+
+        /* -----------------------------------------------
+           Immediately restore local session
+        ------------------------------------------------ */
+
+        setAuthUser({
+          id: storedUser?.id,
+          username:
+            storedUser?.username || 'User',
+          email:
+            storedUser?.email || '',
+          role:
+            storedUser?.role || 'ANALYST',
+          is_active:
+            storedUser?.is_active ?? true,
+          token,
+        });
+
+        /* -----------------------------------------------
+           Verify JWT against backend
+        ------------------------------------------------ */
+
+        try {
+          const response = await fetch(
+            `${API_HOST}/api/auth/me`,
+            {
+              method: 'GET',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: 'application/json',
+              },
+            }
+          );
+
+          /* -------------------------------------------
+             Invalid / expired token
+          -------------------------------------------- */
+
+          if (response.status === 401) {
+            console.warn(
+              'VIGIL session expired.'
+            );
+
+            handleLogout();
+            setInitialized(true);
+            return;
+          }
+
+          /* -------------------------------------------
+             Valid user
+          -------------------------------------------- */
+
+          if (response.ok) {
+            const backendUser =
+              await response.json();
+
+            const completeUser: AuthUser = {
+              id:
+                backendUser?.id ??
+                storedUser?.id,
+
+              username:
+                backendUser?.username ??
+                storedUser?.username ??
+                'User',
+
+              email:
+                backendUser?.email ??
+                storedUser?.email ??
+                '',
+
+              role:
+                backendUser?.role ??
+                storedUser?.role ??
+                'ANALYST',
+
+              is_active:
+                backendUser?.is_active ??
+                storedUser?.is_active ??
+                true,
+
+              token,
+            };
+
+            setAuthUser(completeUser);
+
+            localStorage.setItem(
+              'vigil_user',
+              JSON.stringify({
+                id: completeUser.id,
+                username: completeUser.username,
+                email: completeUser.email,
+                role: completeUser.role,
+                is_active:
+                  completeUser.is_active,
+              })
+            );
+          }
+        } catch (error) {
+          /*
+           * If backend is temporarily unavailable,
+           * keep the local session rather than logging
+           * the user out unnecessarily.
+           */
+
+          console.warn(
+            'Could not verify VIGIL session with backend:',
+            error
+          );
+        }
+      } catch (error) {
+        console.error(
+          'Failed to restore VIGIL session:',
+          error
+        );
+      } finally {
+        setInitialized(true);
+      }
+    };
+
+    restoreSession();
   }, []);
 
-  // Change active tab
+  /* =======================================================
+     CHANGE TAB
+  ======================================================= */
+
   const handleSetActiveTab = (tab: string) => {
     setActiveTab(tab);
     setIsMobileSidebarOpen(false);
   };
 
-  // Logout
-  const handleLogout = () => {
-    localStorage.removeItem('vigil_token');
-    localStorage.removeItem('vigil_user');
+  /* =======================================================
+     LOGIN / SIGNUP SUCCESS
+  ======================================================= */
 
-    setAuthUser(null);
-    setAuthMode('login');
-    setIsMobileSidebarOpen(false);
-  };
-
-  // Login / signup success
   const handleAuthSuccess = (user: {
     username: string;
     role: string;
     token: string;
+    email?: string;
+    id?: number | string;
+    is_active?: boolean;
   }) => {
-    setAuthUser(user);
+    const completeUser: AuthUser = {
+      id: user.id,
+      username: user.username,
+      email: user.email || '',
+      role: user.role,
+      is_active:
+        user.is_active ?? true,
+      token: user.token,
+    };
+
+    setAuthUser(completeUser);
+
+    /* -----------------------------------------------
+       Persist complete user
+    ------------------------------------------------ */
+
+    try {
+      localStorage.setItem(
+        'vigil_token',
+        user.token
+      );
+
+      localStorage.setItem(
+        'vigil_user',
+        JSON.stringify({
+          id: completeUser.id,
+          username: completeUser.username,
+          email: completeUser.email,
+          role: completeUser.role,
+          is_active:
+            completeUser.is_active,
+        })
+      );
+    } catch (error) {
+      console.error(
+        'Failed to save VIGIL session:',
+        error
+      );
+    }
+
     setActiveTab('overview');
     setIsMobileSidebarOpen(false);
   };
 
-  // Loading state
+  /* =======================================================
+     INITIAL LOADING
+  ======================================================= */
+
   if (!initialized) {
     return (
       <div className="min-h-screen w-full bg-[#0B0F17] flex items-center justify-center text-gray-400">
         <div className="text-center">
-          <div className="text-xl font-bold text-white mb-2">
+
+          <div className="mb-4 text-2xl font-black tracking-[0.25em] text-white">
             VIGIL
           </div>
 
-          <div className="text-sm text-gray-500">
+          <div className="mb-3 text-sm text-gray-500">
             Initializing Voice Security Center...
           </div>
+
+          <div className="mx-auto h-1 w-32 overflow-hidden rounded-full bg-gray-800">
+            <div className="h-full w-1/2 animate-pulse rounded-full bg-cyan-400" />
+          </div>
+
         </div>
       </div>
     );
   }
 
-  // Authentication
+  /* =======================================================
+     LOGIN / SIGNUP
+  ======================================================= */
+
   if (!authUser) {
     if (authMode === 'login') {
       return (
         <LoginView
           onLoginSuccess={handleAuthSuccess}
-          onSwitchToSignup={() => setAuthMode('signup')}
+          onSwitchToSignup={() =>
+            setAuthMode('signup')
+          }
         />
       );
     }
@@ -112,12 +361,17 @@ export default function Home() {
     return (
       <SignupView
         onSignupSuccess={handleAuthSuccess}
-        onSwitchToLogin={() => setAuthMode('login')}
+        onSwitchToLogin={() =>
+          setAuthMode('login')
+        }
       />
     );
   }
 
-  // Page title
+  /* =======================================================
+     PAGE TITLE
+  ======================================================= */
+
   const getTabTitle = (tab: string) => {
     switch (tab) {
       case 'overview':
@@ -155,7 +409,10 @@ export default function Home() {
     }
   };
 
-  // Render current page
+  /* =======================================================
+     RENDER ACTIVE VIEW
+  ======================================================= */
+
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':
@@ -172,7 +429,9 @@ export default function Home() {
         return <AnalyzeView />;
 
       case 'speaker-verify':
-        return <SpeakerVerificationView />;
+        return (
+          <SpeakerVerificationView />
+        );
 
       case 'threat-intel':
         return <ThreatIntelView />;
@@ -187,7 +446,20 @@ export default function Home() {
         return <DemoModeView />;
 
       case 'analytics':
+        return (
+          <AnalyticsView
+            user={authUser}
+          />
+        );
+
       case 'settings':
+        return (
+          <SettingsView
+            user={authUser}
+            onLogout={handleLogout}
+          />
+        );
+
       default:
         return (
           <OverviewView
@@ -197,33 +469,61 @@ export default function Home() {
     }
   };
 
-  return (
-    <div className="min-h-screen w-full bg-[#0B0F17] text-gray-100 overflow-x-hidden">
+  /* =======================================================
+     MAIN APPLICATION
+  ======================================================= */
 
-      {/* Mobile sidebar overlay */}
+  return (
+    <div className="min-h-screen w-full overflow-x-hidden bg-[#0B0F17] text-gray-100">
+
+      {/* =================================================
+          MOBILE BACKDROP
+      ================================================= */}
+
       {isMobileSidebarOpen && (
         <button
           type="button"
           aria-label="Close navigation menu"
-          onClick={() => setIsMobileSidebarOpen(false)}
-          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
+          onClick={() =>
+            setIsMobileSidebarOpen(false)
+          }
+          className="
+            fixed
+            inset-0
+            z-40
+            bg-black/60
+            backdrop-blur-sm
+            lg:hidden
+          "
         />
       )}
 
+      {/* =================================================
+          APPLICATION LAYOUT
+      ================================================= */}
+
       <div className="flex min-h-screen w-full">
 
-        {/* Sidebar */}
+        {/* =================================================
+            SIDEBAR
+        ================================================= */}
+
         <div
           className={`
-            fixed inset-y-0 left-0 z-50
-            w-[280px] max-w-[85vw]
-            transform transition-transform duration-300 ease-in-out
-
+            fixed
+            inset-y-0
+            left-0
+            z-50
+            w-[280px]
+            max-w-[85vw]
+            transform
+            transition-transform
+            duration-300
+            ease-in-out
             lg:relative
             lg:translate-x-0
             lg:w-64
             lg:max-w-none
-
             ${
               isMobileSidebarOpen
                 ? 'translate-x-0'
@@ -233,31 +533,51 @@ export default function Home() {
         >
           <Sidebar
             activeTab={activeTab}
-            setActiveTab={handleSetActiveTab}
-            isOpenMobile={isMobileSidebarOpen}
+            setActiveTab={
+              handleSetActiveTab
+            }
+            isOpenMobile={
+              isMobileSidebarOpen
+            }
             onCloseMobile={() =>
               setIsMobileSidebarOpen(false)
             }
           />
         </div>
 
-        {/* Main application */}
+        {/* =================================================
+            MAIN AREA
+        ================================================= */}
+
         <div className="flex min-w-0 flex-1 flex-col">
 
-          {/* Header */}
+          {/* =================================================
+              HEADER
+          ================================================= */}
+
           <Header
             title={getTabTitle(activeTab)}
             user={authUser}
             onLogout={handleLogout}
             onToggleMobileSidebar={() =>
               setIsMobileSidebarOpen(
-                (previous) => !previous
+                previous => !previous
               )
             }
           />
 
-          {/* Page content */}
-          <main className="min-w-0 flex-1 w-full overflow-x-hidden">
+          {/* =================================================
+              PAGE CONTENT
+          ================================================= */}
+
+          <main
+            className="
+              min-w-0
+              flex-1
+              w-full
+              overflow-x-hidden
+            "
+          >
             {renderContent()}
           </main>
 
