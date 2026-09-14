@@ -63,89 +63,31 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
   return (
     <div className="w-full min-w-0 space-y-6 p-4 sm:p-5 lg:p-6">
 
-      {/* =========================================================
+      {/* =====================================================
           WELCOME / SYSTEM BANNER
-      ========================================================= */}
-      <div
-        className="
-          w-full min-w-0
-          rounded-xl
-          border border-[#26334D]
-          bg-[#121824]
-          p-4
-          sm:p-5
-        "
-      >
-        <div
-          className="
-            flex
-            min-w-0
-            flex-col
-            gap-4
-            lg:flex-row
-            lg:items-center
-            lg:justify-between
-          "
-        >
-          {/* LEFT CONTENT */}
+      ===================================================== */}
+      <div className="w-full min-w-0 rounded-xl border border-[#26334D] bg-[#121824] p-4 sm:p-5">
+        <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+
+          {/* LEFT SIDE */}
           <div className="min-w-0 flex-1">
+
+            {/* TITLE + STATUS */}
             <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start">
-              
-              {/* TITLE */}
-              <h1
-                className="
-                  min-w-0
-                  text-xl
-                  font-bold
-                  leading-7
-                  text-white
-                  sm:text-2xl
-                  sm:leading-8
-                "
-              >
+
+              <h1 className="min-w-0 text-xl font-bold leading-7 text-white sm:text-2xl sm:leading-8">
                 Voice Security Intelligence Center
               </h1>
 
-              {/* STATUS */}
-              <span
-                className="
-                  inline-flex
-                  w-fit
-                  max-w-full
-                  shrink-0
-                  items-center
-                  rounded-full
-                  border
-                  border-emerald-500/20
-                  bg-emerald-500/10
-                  px-3
-                  py-1
-                  font-mono
-                  text-[10px]
-                  font-normal
-                  leading-4
-                  text-emerald-400
-                  sm:mt-1
-                  sm:text-xs
-                "
-              >
+              <span className="inline-flex w-fit max-w-full shrink-0 items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 font-mono text-[10px] font-normal leading-4 text-emerald-400 sm:mt-1 sm:text-xs">
                 <span className="mr-1.5">●</span>
                 <span>All Systems Operational</span>
               </span>
             </div>
 
-            <p
-              className="
-                mt-2
-                max-w-2xl
-                text-sm
-                leading-6
-                text-gray-400
-              "
-            >
-              Real-time AI synthetic voice detection,
-              biometric speaker verification & dynamic threat
-              scoring.
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-400">
+              Real-time AI synthetic voice detection, biometric speaker
+              verification & dynamic threat scoring.
             </p>
           </div>
 
@@ -186,32 +128,13 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
         </div>
       </div>
 
-      {/* =========================================================
-          METRICS GRID
-      ========================================================= */}
-      <div
-        className="
-          grid
-          grid-cols-1
-          gap-4
-          sm:grid-cols-2
-          lg:grid-cols-4
-        "
-      >
+      {/* =====================================================
+          METRICS
+      ===================================================== */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+
         {/* ACTIVE SESSIONS */}
-        <div
-          className="
-            flex
-            min-w-0
-            items-center
-            justify-between
-            rounded-xl
-            border
-            border-[#26334D]
-            bg-[#121824]
-            p-4
-          "
-        >
+        <div className="flex min-w-0 items-center justify-between rounded-xl border border-[#26334D] bg-[#121824] p-4">
           <div className="min-w-0">
             <div className="text-xs font-medium text-gray-400">
               Active Sessions
@@ -227,40 +150,13 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             </div>
           </div>
 
-          <div
-            className="
-              ml-3
-              flex
-              h-10
-              w-10
-              shrink-0
-              items-center
-              justify-center
-              rounded-lg
-              border
-              border-blue-500/30
-              bg-blue-500/10
-              text-blue-400
-            "
-          >
+          <div className="ml-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-blue-500/30 bg-blue-500/10 text-blue-400">
             <Activity className="h-5 w-5" />
           </div>
         </div>
 
         {/* THREATS */}
-        <div
-          className="
-            flex
-            min-w-0
-            items-center
-            justify-between
-            rounded-xl
-            border
-            border-[#26334D]
-            bg-[#121824]
-            p-4
-          "
-        >
+        <div className="flex min-w-0 items-center justify-between rounded-xl border border-[#26334D] bg-[#121824] p-4">
           <div className="min-w-0">
             <div className="text-xs font-medium text-gray-400">
               Threats Detected
@@ -276,40 +172,13 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             </div>
           </div>
 
-          <div
-            className="
-              ml-3
-              flex
-              h-10
-              w-10
-              shrink-0
-              items-center
-              justify-center
-              rounded-lg
-              border
-              border-red-500/30
-              bg-red-500/10
-              text-red-400
-            "
-          >
+          <div className="ml-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-red-500/30 bg-red-500/10 text-red-400">
             <ShieldAlert className="h-5 w-5" />
           </div>
         </div>
 
         {/* HIGH RISK */}
-        <div
-          className="
-            flex
-            min-w-0
-            items-center
-            justify-between
-            rounded-xl
-            border
-            border-[#26334D]
-            bg-[#121824]
-            p-4
-          "
-        >
+        <div className="flex min-w-0 items-center justify-between rounded-xl border border-[#26334D] bg-[#121824] p-4">
           <div className="min-w-0">
             <div className="text-xs font-medium text-gray-400">
               High Risk Rate
@@ -324,40 +193,13 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             </div>
           </div>
 
-          <div
-            className="
-              ml-3
-              flex
-              h-10
-              w-10
-              shrink-0
-              items-center
-              justify-center
-              rounded-lg
-              border
-              border-amber-500/30
-              bg-amber-500/10
-              text-amber-400
-            "
-          >
+          <div className="ml-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-400">
             <AlertTriangle className="h-5 w-5" />
           </div>
         </div>
 
-        {/* SPEAKERS */}
-        <div
-          className="
-            flex
-            min-w-0
-            items-center
-            justify-between
-            rounded-xl
-            border
-            border-[#26334D]
-            bg-[#121824]
-            p-4
-          "
-        >
+        {/* ENROLLED SPEAKERS */}
+        <div className="flex min-w-0 items-center justify-between rounded-xl border border-[#26334D] bg-[#121824] p-4">
           <div className="min-w-0">
             <div className="text-xs font-medium text-gray-400">
               Enrolled Speakers
@@ -373,73 +215,26 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             </div>
           </div>
 
-          <div
-            className="
-              ml-3
-              flex
-              h-10
-              w-10
-              shrink-0
-              items-center
-              justify-center
-              rounded-lg
-              border
-              border-emerald-500/30
-              bg-emerald-500/10
-              text-emerald-400
-            "
-          >
+          <div className="ml-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
             <UserCheck className="h-5 w-5" />
           </div>
         </div>
       </div>
 
-      {/* =========================================================
+      {/* =====================================================
           MAIN DASHBOARD
-      ========================================================= */}
-      <div
-        className="
-          grid
-          min-w-0
-          grid-cols-1
-          gap-6
-          lg:grid-cols-3
-        "
-      >
-        {/* =====================================================
+      ===================================================== */}
+      <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-3">
+
+        {/* ===================================================
             LIVE RISK
-        ===================================================== */}
-        <div
-          className="
-            flex
-            min-w-0
-            flex-col
-            items-center
-            justify-center
-            rounded-xl
-            border
-            border-[#26334D]
-            bg-[#121824]
-            p-5
-            text-center
-            sm:p-6
-          "
-        >
-          <h3
-            className="
-              mb-4
-              text-xs
-              font-semibold
-              uppercase
-              tracking-wider
-              text-gray-300
-              sm:text-sm
-            "
-          >
+        =================================================== */}
+        <div className="flex min-w-0 flex-col items-center justify-center rounded-xl border border-[#26334D] bg-[#121824] p-5 text-center sm:p-6">
+
+          <h3 className="mb-4 text-xs font-semibold uppercase tracking-wider text-gray-300 sm:text-sm">
             Current Live Risk Index
           </h3>
 
-          {/* Keep gauge responsive */}
           <div className="w-full max-w-[200px]">
             <RiskGauge
               score={72}
@@ -448,18 +243,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             />
           </div>
 
-          <p
-            className="
-              mt-4
-              max-w-xs
-              text-xs
-              leading-5
-              text-gray-400
-            "
-          >
-            Multi-signal fusion score combining AI voice
-            probability (88%), speaker mismatch, and OTP
-            harvest signals.
+          <p className="mt-4 max-w-xs text-xs leading-5 text-gray-400">
+            Multi-signal fusion score combining AI voice probability
+            (88%), speaker mismatch, and OTP harvest signals.
           </p>
 
           <button
@@ -485,33 +271,12 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           </button>
         </div>
 
-        {/* =====================================================
+        {/* ===================================================
             THREAT DISTRIBUTION
-        ===================================================== */}
-        <div
-          className="
-            flex
-            min-w-0
-            flex-col
-            rounded-xl
-            border
-            border-[#26334D]
-            bg-[#121824]
-            p-4
-            sm:p-5
-          "
-        >
-          <h3
-            className="
-              mb-2
-              text-xs
-              font-semibold
-              uppercase
-              tracking-wider
-              text-gray-300
-              sm:text-sm
-            "
-          >
+        =================================================== */}
+        <div className="flex min-w-0 flex-col rounded-xl border border-[#26334D] bg-[#121824] p-4 sm:p-5">
+
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-300 sm:text-sm">
             Threat Vector Breakdown
           </h3>
 
@@ -547,25 +312,11 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             </ResponsiveContainer>
           </div>
 
-          {/* Responsive legend */}
-          <div
-            className="
-              grid
-              grid-cols-1
-              gap-2
-              text-xs
-              sm:grid-cols-2
-            "
-          >
+          <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
             {threatData.map((t, idx) => (
               <div
                 key={idx}
-                className="
-                  flex
-                  min-w-0
-                  items-center
-                  gap-2
-                "
+                className="flex min-w-0 items-center gap-2"
               >
                 <span
                   className="h-2.5 w-2.5 shrink-0 rounded-full"
@@ -586,60 +337,26 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           </div>
         </div>
 
-        {/* =====================================================
+        {/* ===================================================
             RECENT ALERTS
-        ===================================================== */}
-        <div
-          className="
-            flex
-            min-w-0
-            flex-col
-            rounded-xl
-            border
-            border-[#26334D]
-            bg-[#121824]
-            p-4
-            sm:p-5
-          "
-        >
-          <div
-            className="
-              mb-3
-              flex
-              min-w-0
-              items-center
-              justify-between
-              gap-3
-            "
-          >
-            <h3
-              className="
-                min-w-0
-                text-xs
-                font-semibold
-                uppercase
-                tracking-wider
-                text-gray-300
-                sm:text-sm
-              "
-            >
+        =================================================== */}
+        <div className="flex min-w-0 flex-col rounded-xl border border-[#26334D] bg-[#121824] p-4 sm:p-5">
+
+          <div className="mb-3 flex min-w-0 items-center justify-between gap-3">
+            <h3 className="min-w-0 text-xs font-semibold uppercase tracking-wider text-gray-300 sm:text-sm">
               Recent High-Risk Alerts
             </h3>
 
             <button
               onClick={() => onNavigate('alerts')}
-              className="
-                shrink-0
-                text-xs
-                text-blue-400
-                hover:underline
-              "
+              className="shrink-0 text-xs text-blue-400 hover:underline"
             >
               View All
             </button>
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto">
+
             {recentAlerts.map((alert) => (
               <div
                 key={alert.id}
@@ -658,7 +375,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               >
                 {/* ALERT INFO */}
                 <div className="min-w-0 flex-1">
+
                   <div className="flex min-w-0 items-center gap-2">
+
                     <span
                       className={`
                         shrink-0
@@ -701,6 +420,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                 </div>
               </div>
             ))}
+
           </div>
         </div>
       </div>
