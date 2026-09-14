@@ -20,7 +20,7 @@ import { LoginView } from '@/components/LoginView';
 import { SignupView } from '@/components/SignupView';
 
 /* =========================================================
-   USER TYPE
+   TYPES
    ========================================================= */
 
 export type AuthUser = {
@@ -33,7 +33,7 @@ export type AuthUser = {
 };
 
 /* =========================================================
-   API HOST
+   API
    ========================================================= */
 
 const API_HOST =
@@ -45,16 +45,16 @@ const API_HOST =
    ========================================================= */
 
 export default function Home() {
-  /* -------------------------------------------------------
+  /* =======================================================
      ACTIVE TAB
-  ------------------------------------------------------- */
+     ======================================================= */
 
   const [activeTab, setActiveTab] =
     useState('overview');
 
-  /* -------------------------------------------------------
+  /* =======================================================
      AUTHENTICATION
-  ------------------------------------------------------- */
+     ======================================================= */
 
   const [authUser, setAuthUser] =
     useState<AuthUser | null>(null);
@@ -65,16 +65,16 @@ export default function Home() {
   const [initialized, setInitialized] =
     useState(false);
 
-  /* -------------------------------------------------------
+  /* =======================================================
      MOBILE SIDEBAR
-  ------------------------------------------------------- */
+     ======================================================= */
 
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] =
     useState(false);
 
   /* =======================================================
      LOGOUT
-  ======================================================= */
+     ======================================================= */
 
   const handleLogout = () => {
     try {
@@ -94,61 +94,85 @@ export default function Home() {
   };
 
   /* =======================================================
-     RESTORE AUTHENTICATION
-  ======================================================= */
+     RESTORE LOGIN SESSION
+     ======================================================= */
 
   useEffect(() => {
+    let cancelled = false;
+
     const restoreSession = async () => {
       try {
         const token =
           localStorage.getItem('vigil_token');
 
-        const userStr =
+        const storedUserString =
           localStorage.getItem('vigil_user');
 
-        /* -----------------------------------------------
-           No saved session
-        ------------------------------------------------ */
+        /* ---------------------------------------------------
+           No stored login
+           --------------------------------------------------- */
 
-        if (!token || !userStr) {
-          setInitialized(true);
+        if (!token || !storedUserString) {
+          if (!cancelled) {
+            setInitialized(true);
+          }
+
           return;
         }
+
+        /* ---------------------------------------------------
+           Parse stored user
+           --------------------------------------------------- */
 
         let storedUser: any;
 
         try {
-          storedUser = JSON.parse(userStr);
-        } catch {
-          console.warn(
-            'Invalid stored VIGIL user data.'
+          storedUser =
+            JSON.parse(storedUserString);
+        } catch (error) {
+          console.error(
+            'Invalid stored VIGIL user:',
+            error
           );
 
-          handleLogout();
-          setInitialized(true);
+          localStorage.removeItem(
+            'vigil_token'
+          );
+
+          localStorage.removeItem(
+            'vigil_user'
+          );
+
+          if (!cancelled) {
+            setAuthUser(null);
+            setInitialized(true);
+          }
+
           return;
         }
 
-        /* -----------------------------------------------
-           Immediately restore local session
-        ------------------------------------------------ */
+        /* ---------------------------------------------------
+           Restore immediately from local storage
+           --------------------------------------------------- */
 
-        setAuthUser({
-          id: storedUser?.id,
-          username:
-            storedUser?.username || 'User',
-          email:
-            storedUser?.email || '',
-          role:
-            storedUser?.role || 'ANALYST',
-          is_active:
-            storedUser?.is_active ?? true,
-          token,
-        });
+        if (!cancelled) {
+          setAuthUser({
+            id: storedUser?.id,
+            username:
+              storedUser?.username || 'User',
+            email:
+              storedUser?.email || '',
+            role:
+              storedUser?.role || 'ANALYST',
+            is_active:
+              storedUser?.is_active ?? true,
+            token,
+          });
+        }
 
-        /* -----------------------------------------------
-           Verify JWT against backend
-        ------------------------------------------------ */
+        /* ---------------------------------------------------
+           Verify session with backend
+           --------------------------------------------------- */
 
         try {
           const response = await fetch(
@@ -156,29 +180,36 @@ export default function Home() {
             {
               method: 'GET',
               headers: {
-                Authorization: `Bearer ${token}`,
+                Authorization:
+                  `Bearer ${token}`,
                 Accept: 'application/json',
               },
             }
           );
 
-          /* -------------------------------------------
-             Invalid / expired token
-          -------------------------------------------- */
+          /* -------------------------------------------------
+             Token expired / invalid
+             ------------------------------------------------- */
 
           if (response.status === 401) {
-            console.warn(
-              'VIGIL session expired.'
+            localStorage.removeItem(
+              'vigil_token'
             );
 
-            handleLogout();
-            setInitialized(true);
+            localStorage.removeItem(
+              'vigil_user'
+            );
+
+            if (!cancelled) {
+              setAuthUser(null);
+            }
+
             return;
           }
 
-          /* -------------------------------------------
-             Valid user
-          -------------------------------------------- */
+          /* -------------------------------------------------
+             Valid backend user
+             ------------------------------------------------- */
 
           if (response.ok) {
             const backendUser =
@@ -212,15 +243,24 @@ export default function Home() {
               token,
             };
 
-            setAuthUser(completeUser);
+            if (!cancelled) {
+              setAuthUser(completeUser);
+            }
+
+            /* -----------------------------------------------
+               Keep complete user in local storage
+               ----------------------------------------------- */
 
             localStorage.setItem(
               'vigil_user',
               JSON.stringify({
                 id: completeUser.id,
-                username: completeUser.username,
-                email: completeUser.email,
-                role: completeUser.role,
+                username:
+                  completeUser.username,
+                email:
+                  completeUser.email,
+                role:
+                  completeUser.role,
                 is_active:
                   completeUser.is_active,
               })
@@ -228,13 +268,14 @@ export default function Home() {
           }
         } catch (error) {
           /*
-           * If backend is temporarily unavailable,
-           * keep the local session rather than logging
-           * the user out unnecessarily.
+           * Backend may temporarily be unavailable.
+           *
+           * We intentionally keep the locally restored
+           * session instead of logging the user out.
            */
 
           console.warn(
-            'Could not verify VIGIL session with backend:',
+            'Could not verify VIGIL session:',
             error
           );
         }
@@ -243,26 +284,38 @@ export default function Home() {
           'Failed to restore VIGIL session:',
           error
         );
+
+        if (!cancelled) {
+          setAuthUser(null);
+        }
       } finally {
-        setInitialized(true);
+        if (!cancelled) {
+          setInitialized(true);
+        }
       }
     };
 
     restoreSession();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   /* =======================================================
      CHANGE TAB
-  ======================================================= */
+     ======================================================= */
 
-  const handleSetActiveTab = (tab: string) => {
+  const handleSetActiveTab = (
+    tab: string
+  ) => {
     setActiveTab(tab);
     setIsMobileSidebarOpen(false);
   };
 
   /* =======================================================
      LOGIN / SIGNUP SUCCESS
-  ======================================================= */
+     ======================================================= */
 
   const handleAuthSuccess = (user: {
     username: string;
@@ -274,33 +327,48 @@ export default function Home() {
   }) => {
     const completeUser: AuthUser = {
       id: user.id,
-      username: user.username,
-      email: user.email || '',
-      role: user.role,
+
+      username:
+        user.username || 'User',
+
+      email:
+        user.email || '',
+
+      role:
+        user.role || 'ANALYST',
+
       is_active:
         user.is_active ?? true,
+
       token: user.token,
     };
 
+    /* -----------------------------------------------------
+       Update React state
+       ----------------------------------------------------- */
+
     setAuthUser(completeUser);
 
-    /* -----------------------------------------------
-       Persist complete user
-    ------------------------------------------------ */
+    /* -----------------------------------------------------
+       Save token
+       ----------------------------------------------------- */
 
     try {
       localStorage.setItem(
         'vigil_token',
-        user.token
+        completeUser.token
       );
 
       localStorage.setItem(
         'vigil_user',
         JSON.stringify({
           id: completeUser.id,
-          username: completeUser.username,
-          email: completeUser.email,
-          role: completeUser.role,
+          username:
+            completeUser.username,
+          email:
+            completeUser.email,
+          role:
+            completeUser.role,
           is_active:
             completeUser.is_active,
         })
@@ -312,29 +380,74 @@ export default function Home() {
       );
     }
 
+    /* -----------------------------------------------------
+       Return to dashboard
+       ----------------------------------------------------- */
+
     setActiveTab('overview');
     setIsMobileSidebarOpen(false);
   };
 
   /* =======================================================
      INITIAL LOADING
-  ======================================================= */
+     ======================================================= */
 
   if (!initialized) {
     return (
-      <div className="min-h-screen w-full bg-[#0B0F17] flex items-center justify-center text-gray-400">
+      <div
+        className="
+          min-h-screen
+          w-full
+          bg-[#0B0F17]
+          flex
+          items-center
+          justify-center
+          text-gray-400
+        "
+      >
         <div className="text-center">
 
-          <div className="mb-4 text-2xl font-black tracking-[0.25em] text-white">
+          <div
+            className="
+              mb-4
+              text-2xl
+              font-black
+              tracking-[0.25em]
+              text-white
+            "
+          >
             VIGIL
           </div>
 
-          <div className="mb-3 text-sm text-gray-500">
+          <div
+            className="
+              mb-4
+              text-sm
+              text-gray-500
+            "
+          >
             Initializing Voice Security Center...
           </div>
 
-          <div className="mx-auto h-1 w-32 overflow-hidden rounded-full bg-gray-800">
-            <div className="h-full w-1/2 animate-pulse rounded-full bg-cyan-400" />
+          <div
+            className="
+              mx-auto
+              h-1
+              w-32
+              overflow-hidden
+              rounded-full
+              bg-gray-800
+            "
+          >
+            <div
+              className="
+                h-full
+                w-1/2
+                animate-pulse
+                rounded-full
+                bg-cyan-400
+              "
+            />
           </div>
 
         </div>
@@ -344,13 +457,15 @@ export default function Home() {
 
   /* =======================================================
      LOGIN / SIGNUP
-  ======================================================= */
+     ======================================================= */
 
   if (!authUser) {
     if (authMode === 'login') {
       return (
         <LoginView
-          onLoginSuccess={handleAuthSuccess}
+          onLoginSuccess={
+            handleAuthSuccess
+          }
           onSwitchToSignup={() =>
             setAuthMode('signup')
           }
@@ -360,7 +475,9 @@ export default function Home() {
 
     return (
       <SignupView
-        onSignupSuccess={handleAuthSuccess}
+        onSignupSuccess={
+          handleAuthSuccess
+        }
         onSwitchToLogin={() =>
           setAuthMode('login')
         }
@@ -370,9 +487,11 @@ export default function Home() {
 
   /* =======================================================
      PAGE TITLE
-  ======================================================= */
+     ======================================================= */
 
-  const getTabTitle = (tab: string) => {
+  const getTabTitle = (
+    tab: string
+  ) => {
     switch (tab) {
       case 'overview':
         return 'Overview Dashboard';
@@ -410,23 +529,29 @@ export default function Home() {
   };
 
   /* =======================================================
-     RENDER ACTIVE VIEW
-  ======================================================= */
+     RENDER CONTENT
+     ======================================================= */
 
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':
         return (
           <OverviewView
-            onNavigate={handleSetActiveTab}
+            onNavigate={
+              handleSetActiveTab
+            }
           />
         );
 
       case 'live-monitor':
-        return <LiveMonitorView />;
+        return (
+          <LiveMonitorView />
+        );
 
       case 'analyze':
-        return <AnalyzeView />;
+        return (
+          <AnalyzeView />
+        );
 
       case 'speaker-verify':
         return (
@@ -434,16 +559,24 @@ export default function Home() {
         );
 
       case 'threat-intel':
-        return <ThreatIntelView />;
+        return (
+          <ThreatIntelView />
+        );
 
       case 'sessions':
-        return <SessionsView />;
+        return (
+          <SessionsView />
+        );
 
       case 'alerts':
-        return <AlertsView />;
+        return (
+          <AlertsView />
+        );
 
       case 'demo-mode':
-        return <DemoModeView />;
+        return (
+          <DemoModeView />
+        );
 
       case 'analytics':
         return (
@@ -463,7 +596,9 @@ export default function Home() {
       default:
         return (
           <OverviewView
-            onNavigate={handleSetActiveTab}
+            onNavigate={
+              handleSetActiveTab
+            }
           />
         );
     }
@@ -471,13 +606,21 @@ export default function Home() {
 
   /* =======================================================
      MAIN APPLICATION
-  ======================================================= */
+     ======================================================= */
 
   return (
-    <div className="min-h-screen w-full overflow-x-hidden bg-[#0B0F17] text-gray-100">
+    <div
+      className="
+        min-h-screen
+        w-full
+        overflow-x-hidden
+        bg-[#0B0F17]
+        text-gray-100
+      "
+    >
 
       {/* =================================================
-          MOBILE BACKDROP
+          MOBILE SIDEBAR BACKDROP
       ================================================= */}
 
       {isMobileSidebarOpen && (
@@ -502,7 +645,13 @@ export default function Home() {
           APPLICATION LAYOUT
       ================================================= */}
 
-      <div className="flex min-h-screen w-full">
+      <div
+        className="
+          flex
+          min-h-screen
+          w-full
+        "
+      >
 
         {/* =================================================
             SIDEBAR
@@ -520,10 +669,12 @@ export default function Home() {
             transition-transform
             duration-300
             ease-in-out
+
             lg:relative
             lg:translate-x-0
             lg:w-64
             lg:max-w-none
+
             ${
               isMobileSidebarOpen
                 ? 'translate-x-0'
@@ -532,36 +683,58 @@ export default function Home() {
           `}
         >
           <Sidebar
-            activeTab={activeTab}
+            activeTab={
+              activeTab
+            }
+
             setActiveTab={
               handleSetActiveTab
             }
+
             isOpenMobile={
               isMobileSidebarOpen
             }
+
             onCloseMobile={() =>
-              setIsMobileSidebarOpen(false)
+              setIsMobileSidebarOpen(
+                false
+              )
             }
           />
         </div>
 
         {/* =================================================
-            MAIN AREA
+            MAIN CONTENT AREA
         ================================================= */}
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div
+          className="
+            flex
+            min-w-0
+            flex-1
+            flex-col
+          "
+        >
 
           {/* =================================================
               HEADER
           ================================================= */}
 
           <Header
-            title={getTabTitle(activeTab)}
+            title={
+              getTabTitle(activeTab)
+            }
+
             user={authUser}
-            onLogout={handleLogout}
+
+            onLogout={
+              handleLogout
+            }
+
             onToggleMobileSidebar={() =>
               setIsMobileSidebarOpen(
-                previous => !previous
+                previous =>
+                  !previous
               )
             }
           />
@@ -573,8 +746,8 @@ export default function Home() {
           <main
             className="
               min-w-0
-              flex-1
               w-full
+              flex-1
               overflow-x-hidden
             "
           >
