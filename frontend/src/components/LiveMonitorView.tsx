@@ -84,17 +84,20 @@ type AnalysisMessage = {
   };
 };
 
+type SpeakerProfile = {
+  speaker_id: string;
+  name?: string;
+};
+
 export const LiveMonitorView: React.FC = () => {
   // =========================================================
   // UI STATE
   // =========================================================
 
   const [isRecording, setIsRecording] = useState(false);
-
   const [duration, setDuration] = useState(0);
 
   const [riskScore, setRiskScore] = useState(0);
-
   const [riskLevel, setRiskLevel] = useState('LOW');
 
   const [synthProb, setSynthProb] = useState(0);
@@ -109,7 +112,7 @@ export const LiveMonitorView: React.FC = () => {
     useState('NONE');
 
   const [speakerProfiles, setSpeakerProfiles] =
-    useState<any[]>([]);
+    useState<SpeakerProfile[]>([]);
 
   const [selectedSpeakerId, setSelectedSpeakerId] =
     useState<string>('');
@@ -206,35 +209,17 @@ export const LiveMonitorView: React.FC = () => {
   }, []);
 
   // =========================================================
-  // CLEANUP ON PAGE UNMOUNT
+  // FORMAT TIME
   // =========================================================
 
-  useEffect(() => {
-    return () => {
-      stopAllMonitoring();
-    };
-  }, []);
+  const formatTime = (secs: number) => {
+    const mins = Math.floor(secs / 60);
+    const remainder = secs % 60;
 
-  // =========================================================
-  // TIMER
-  // =========================================================
-
-  useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | null =
-      null;
-
-    if (isRecording) {
-      timer = setInterval(() => {
-        setDuration((previous) => previous + 1);
-      }, 1000);
-    }
-
-    return () => {
-      if (timer) {
-        clearInterval(timer);
-      }
-    };
-  }, [isRecording]);
+    return `${mins < 10 ? '0' : ''}${mins}:${
+      remainder < 10 ? '0' : ''
+    }${remainder}`;
+  };
 
   // =========================================================
   // PCM FLOAT32 → PCM16 BASE64
@@ -296,20 +281,6 @@ export const LiveMonitorView: React.FC = () => {
     }
 
     return btoa(binary);
-  };
-
-  // =========================================================
-  // FORMAT TIME
-  // =========================================================
-
-  const formatTime = (secs: number) => {
-    const mins = Math.floor(secs / 60);
-
-    const remainder = secs % 60;
-
-    return `${mins < 10 ? '0' : ''}${mins}:${
-      remainder < 10 ? '0' : ''
-    }${remainder}`;
   };
 
   // =========================================================
@@ -481,6 +452,9 @@ export const LiveMonitorView: React.FC = () => {
           websocketRef.current =
             websocket;
 
+          let connectionResolved =
+            false;
+
           websocket.onopen = () => {
             console.log(
               '[VIGIL] WebSocket connected'
@@ -494,6 +468,9 @@ export const LiveMonitorView: React.FC = () => {
                   null,
               })
             );
+
+            connectionResolved =
+              true;
 
             resolve(websocket);
           };
@@ -525,11 +502,13 @@ export const LiveMonitorView: React.FC = () => {
               error
             );
 
-            reject(
-              new Error(
-                'Could not connect to VIGIL live analysis server.'
-              )
-            );
+            if (!connectionResolved) {
+              reject(
+                new Error(
+                  'Could not connect to VIGIL live analysis server.'
+                )
+              );
+            }
           };
 
           websocket.onclose = () => {
@@ -573,12 +552,8 @@ export const LiveMonitorView: React.FC = () => {
           new SpeechRecognition();
 
         recognition.continuous = true;
-
-        recognition.interimResults =
-          true;
-
-        recognition.lang =
-          'en-IN';
+        recognition.interimResults = true;
+        recognition.lang = 'en-IN';
 
         recognition.onresult = (
           event: any
@@ -696,6 +671,151 @@ export const LiveMonitorView: React.FC = () => {
     };
 
   // =========================================================
+  // STOP EVERYTHING
+  // =========================================================
+
+  const stopAllMonitoring =
+    () => {
+      isRecordingRef.current =
+        false;
+
+      stopSpeechRecognition();
+
+      // -------------------------------------------------------
+      // AUDIO PROCESSOR
+      // -------------------------------------------------------
+
+      try {
+        processorRef.current?.disconnect();
+      } catch {
+        // Already disconnected.
+      }
+
+      processorRef.current =
+        null;
+
+      // -------------------------------------------------------
+      // AUDIO SOURCE
+      // -------------------------------------------------------
+
+      try {
+        audioSourceRef.current?.disconnect();
+      } catch {
+        // Already disconnected.
+      }
+
+      audioSourceRef.current =
+        null;
+
+      // -------------------------------------------------------
+      // MICROPHONE TRACKS
+      // -------------------------------------------------------
+
+      if (
+        mediaStreamRef.current
+      ) {
+        mediaStreamRef.current
+          .getTracks()
+          .forEach(
+            (track) => {
+              track.stop();
+            }
+          );
+      }
+
+      mediaStreamRef.current =
+        null;
+
+      // -------------------------------------------------------
+      // AUDIO CONTEXT
+      // -------------------------------------------------------
+
+      if (
+        audioContextRef.current
+      ) {
+        try {
+          audioContextRef.current.close();
+        } catch {
+          // Already closed.
+        }
+      }
+
+      audioContextRef.current =
+        null;
+
+      // -------------------------------------------------------
+      // WEBSOCKET
+      // -------------------------------------------------------
+
+      const websocket =
+        websocketRef.current;
+
+      if (websocket) {
+        try {
+          if (
+            websocket.readyState ===
+            WebSocket.OPEN
+          ) {
+            websocket.send(
+              JSON.stringify({
+                type: 'stop_session',
+              })
+            );
+          }
+        } catch {
+          // Ignore send failure.
+        }
+
+        try {
+          websocket.close();
+        } catch {
+          // Already closed.
+        }
+      }
+
+      websocketRef.current =
+        null;
+
+      setIsRecording(false);
+      setDuration(0);
+    };
+
+  // =========================================================
+  // CLEANUP ON PAGE UNMOUNT
+  // =========================================================
+
+  useEffect(() => {
+    return () => {
+      stopAllMonitoring();
+    };
+  }, []);
+
+  // =========================================================
+  // TIMER
+  // =========================================================
+
+  useEffect(() => {
+    let timer:
+      ReturnType<typeof setInterval> | null =
+      null;
+
+    if (isRecording) {
+      timer = setInterval(() => {
+        setDuration(
+          (previous) =>
+            previous + 1
+        );
+      }, 1000);
+    }
+
+    return () => {
+      if (timer) {
+        clearInterval(timer);
+      }
+    };
+  }, [isRecording]);
+
+  // =========================================================
   // START MICROPHONE
   // =========================================================
 
@@ -708,16 +828,22 @@ export const LiveMonitorView: React.FC = () => {
       }
 
       try {
-        // Reset session state.
+        // -----------------------------------------------------
+        // RESET SESSION STATE
+        // -----------------------------------------------------
+
         setRiskScore(0);
         setRiskLevel('LOW');
         setSynthProb(0);
+
         setSpeakerSimilarity(null);
+
         setSpeakerStatus(
           selectedSpeakerId
             ? 'CHECKING'
             : 'NOT_ENROLLED'
         );
+
         setImpersonation('NONE');
         setDuration(0);
         setTimelineData([]);
@@ -851,11 +977,11 @@ export const LiveMonitorView: React.FC = () => {
         );
 
         /*
-         * Connect to destination so the ScriptProcessor
-         * remains active in browsers.
+         * Connect processor to destination
+         * so ScriptProcessorNode remains active.
          *
-         * The microphone stream itself is not routed
-         * directly to the speakers.
+         * The microphone is NOT directly routed
+         * to the speakers.
          */
         processor.connect(
           audioContext.destination
@@ -891,120 +1017,6 @@ export const LiveMonitorView: React.FC = () => {
           'VIGIL could not start microphone monitoring. Please allow microphone access and try again.'
         );
       }
-    };
-
-  // =========================================================
-  // STOP EVERYTHING
-  // =========================================================
-
-  const stopAllMonitoring =
-    () => {
-      isRecordingRef.current =
-        false;
-
-      stopSpeechRecognition();
-
-      // -------------------------------------------------------
-      // AUDIO PROCESSOR
-      // -------------------------------------------------------
-
-      try {
-        processorRef.current?.disconnect();
-      } catch {
-        // Already disconnected.
-      }
-
-      processorRef.current =
-        null;
-
-      // -------------------------------------------------------
-      // AUDIO SOURCE
-      // -------------------------------------------------------
-
-      try {
-        audioSourceRef.current?.disconnect();
-      } catch {
-        // Already disconnected.
-      }
-
-      audioSourceRef.current =
-        null;
-
-      // -------------------------------------------------------
-      // MICROPHONE TRACKS
-      // -------------------------------------------------------
-
-      if (
-        mediaStreamRef.current
-      ) {
-        mediaStreamRef.current
-          .getTracks()
-          .forEach(
-            (track) => {
-              track.stop();
-            }
-          );
-      }
-
-      mediaStreamRef.current =
-        null;
-
-      // -------------------------------------------------------
-      // AUDIO CONTEXT
-      // -------------------------------------------------------
-
-      if (
-        audioContextRef.current
-      ) {
-        try {
-          audioContextRef.current.close();
-        } catch {
-          // Already closed.
-        }
-      }
-
-      audioContextRef.current =
-        null;
-
-      // -------------------------------------------------------
-      // WEBSOCKET
-      // -------------------------------------------------------
-
-      const websocket =
-        websocketRef.current;
-
-      if (websocket) {
-        try {
-          if (
-            websocket.readyState ===
-            WebSocket.OPEN
-          ) {
-            websocket.send(
-              JSON.stringify({
-                type: 'stop_session',
-              })
-            );
-          }
-        } catch {
-          // Ignore send failure during cleanup.
-        }
-
-        try {
-          websocket.close();
-        } catch {
-          // Already closed.
-        }
-      }
-
-      websocketRef.current =
-        null;
-
-      setIsRecording(false);
-      setDuration(0);
-
-      console.log(
-        '[VIGIL] Live monitoring stopped'
-      );
     };
 
   // =========================================================
@@ -1065,7 +1077,7 @@ export const LiveMonitorView: React.FC = () => {
         speakerStatus ===
         'MATCH'
       ) {
-        return 'bg-emerald-500/20 text-emerald-400';
+        return 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
       }
 
       if (
@@ -1101,93 +1113,132 @@ export const LiveMonitorView: React.FC = () => {
   // =========================================================
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Top Banner Control Bar */}
-      <div className="bg-[#121824] border border-[#26334D] rounded-xl p-4 flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <button
-            onClick={toggleRecording}
-            className={`flex items-center space-x-2 px-5 py-2.5 rounded-lg font-semibold text-sm transition-all shadow-lg ${
-              isRecording
-                ? 'bg-red-600 hover:bg-red-500 text-white shadow-red-600/30 animate-pulse'
-                : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/30'
-            }`}
-          >
-            {isRecording ? (
-              <MicOff className="w-4 h-4" />
-            ) : (
-              <Mic className="w-4 h-4" />
-            )}
+    <div className="w-full min-w-0 p-3 sm:p-4 md:p-6 space-y-4 md:space-y-6">
 
-            <span>
-              {isRecording
-                ? 'Stop Live Monitor'
-                : 'Start Microphone Monitor'}
-            </span>
-          </button>
+      {/* =====================================================
+          TOP CONTROL BAR
+          ===================================================== */}
 
-          <div className="flex items-center space-x-3 text-xs font-mono bg-[#0B0F17] px-3.5 py-2 rounded-lg border border-[#26334D]">
-            <Clock className="w-4 h-4 text-blue-400" />
+      <div className="w-full min-w-0 bg-[#121824] border border-[#26334D] rounded-xl p-3 sm:p-4">
 
-            <span className="text-gray-400">
-              Duration:
-            </span>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
 
-            <span className="font-bold text-white">
-              {formatTime(duration)}
-            </span>
-          </div>
-        </div>
+          {/* MICROPHONE + TIMER */}
 
-        {/* Dynamic Speaker Selector */}
-        <div className="flex items-center space-x-2">
-          <span className="text-xs text-gray-400 font-mono">
-            Target Profile:
-          </span>
+          <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
 
-          {speakerProfiles.length > 0 ? (
-            <select
-              value={selectedSpeakerId}
-              onChange={(e) =>
-                setSelectedSpeakerId(
-                  e.target.value
-                )
-              }
-              disabled={isRecording}
-              className="bg-[#192233] border border-[#26334D] text-xs font-bold text-blue-400 rounded px-2.5 py-1 focus:outline-none disabled:opacity-50"
+            <button
+              onClick={toggleRecording}
+              className={`w-full sm:w-auto min-h-[48px] flex items-center justify-center gap-2 px-5 py-3 rounded-lg font-semibold text-sm transition-all shadow-lg ${
+                isRecording
+                  ? 'bg-red-600 hover:bg-red-500 text-white shadow-red-600/30 animate-pulse'
+                  : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/30'
+              }`}
             >
-              {speakerProfiles.map(
-                (p) => (
-                  <option
-                    key={p.speaker_id}
-                    value={p.speaker_id}
-                  >
-                    {p.speaker_id} (
-                    {p.name})
-                  </option>
-                )
+              {isRecording ? (
+                <MicOff className="w-4 h-4 flex-shrink-0" />
+              ) : (
+                <Mic className="w-4 h-4 flex-shrink-0" />
               )}
-            </select>
-          ) : (
-            <span className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded">
-              No Speaker Enrolled Yet
-            </span>
-          )}
+
+              <span className="whitespace-nowrap">
+                {isRecording
+                  ? 'Stop Live Monitor'
+                  : 'Start Microphone Monitor'}
+              </span>
+            </button>
+
+            <div className="w-full sm:w-auto min-h-[48px] flex items-center justify-center gap-2 text-xs font-mono bg-[#0B0F17] px-4 py-3 rounded-lg border border-[#26334D]">
+
+              <Clock className="w-4 h-4 text-blue-400 flex-shrink-0" />
+
+              <span className="text-gray-400">
+                Duration:
+              </span>
+
+              <span className="font-bold text-white">
+                {formatTime(duration)}
+              </span>
+
+            </div>
+          </div>
+
+          {/* TARGET SPEAKER */}
+
+          <div className="w-full lg:w-auto min-w-0">
+
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+
+              <span className="text-xs text-gray-400 font-mono whitespace-nowrap">
+                Target Profile:
+              </span>
+
+              {speakerProfiles.length > 0 ? (
+                <select
+                  value={selectedSpeakerId}
+                  onChange={(e) =>
+                    setSelectedSpeakerId(
+                      e.target.value
+                    )
+                  }
+                  disabled={isRecording}
+                  className="w-full sm:w-auto min-w-0 max-w-full bg-[#192233] border border-[#26334D] text-xs font-bold text-blue-400 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                >
+                  {speakerProfiles.map(
+                    (profile) => (
+                      <option
+                        key={
+                          profile.speaker_id
+                        }
+                        value={
+                          profile.speaker_id
+                        }
+                      >
+                        {profile.speaker_id}
+                        {profile.name
+                          ? ` (${profile.name})`
+                          : ''}
+                      </option>
+                    )
+                  )}
+                </select>
+              ) : (
+                <span className="w-full sm:w-auto text-center text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 rounded-lg">
+                  No Speaker Enrolled Yet
+                </span>
+              )}
+
+            </div>
+
+          </div>
+
         </div>
       </div>
 
-      {/* Main 3-Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column */}
-        <div className="lg:col-span-4 space-y-6">
-          <div className="bg-[#121824] border border-[#26334D] rounded-xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider font-mono">
+      {/* =====================================================
+          MAIN RESPONSIVE GRID
+          ===================================================== */}
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6">
+
+        {/* ===================================================
+            LEFT COLUMN
+            =================================================== */}
+
+        <div className="lg:col-span-4 space-y-4 md:space-y-6 min-w-0">
+
+          {/* AUDIO WAVEFORM */}
+
+          <div className="w-full min-w-0 bg-[#121824] border border-[#26334D] rounded-xl p-4 sm:p-5">
+
+            <div className="flex items-center justify-between gap-3 mb-3">
+
+              <h3 className="min-w-0 text-xs font-semibold text-gray-300 uppercase tracking-wider font-mono truncate">
                 Acoustic Audio Oscilloscope
               </h3>
 
               <span
-                className={`text-[10px] font-mono px-2 py-0.5 rounded ${
+                className={`flex-shrink-0 text-[10px] font-mono px-2 py-1 rounded ${
                   isRecording
                     ? 'bg-emerald-500/20 text-emerald-400'
                     : 'bg-gray-700 text-gray-400'
@@ -1197,56 +1248,72 @@ export const LiveMonitorView: React.FC = () => {
                   ? 'STREAMING'
                   : 'IDLE'}
               </span>
+
             </div>
 
-            <AudioWaveform
-              isRecording={
-                isRecording
-              }
-              color={
-                riskScore > 60
-                  ? '#EF4444'
-                  : '#3B82F6'
-              }
-            />
+            <div className="w-full min-w-0 overflow-hidden rounded-lg">
+
+              <AudioWaveform
+                isRecording={
+                  isRecording
+                }
+                color={
+                  riskScore > 60
+                    ? '#EF4444'
+                    : '#3B82F6'
+                }
+              />
+
+            </div>
+
           </div>
 
-          <div className="bg-[#121824] border border-[#26334D] rounded-xl p-5 space-y-4">
-            <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider font-mono border-b border-[#26334D] pb-2">
+          {/* VOICE AUTHENTICITY */}
+
+          <div className="w-full min-w-0 bg-[#121824] border border-[#26334D] rounded-xl p-4 sm:p-5 space-y-3">
+
+            <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider font-mono border-b border-[#26334D] pb-3">
               Voice Authenticity Metrics
             </h3>
 
-            <div className="flex items-center justify-between bg-[#192233] p-3 rounded-lg border border-[#26334D]">
-              <div>
+            {/* AI PROBABILITY */}
+
+            <div className="w-full min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-[#192233] p-3 rounded-lg border border-[#26334D]">
+
+              <div className="min-w-0">
                 <div className="text-xs text-gray-400">
                   AI Voice Probability
                 </div>
 
                 <div className="text-lg font-bold font-mono text-white">
-                  {(synthProb * 100).toFixed(
-                    0
-                  )}
+                  {(
+                    synthProb * 100
+                  ).toFixed(0)}
                   %
                 </div>
               </div>
 
               <div
-                className={`px-2.5 py-1 text-xs font-bold rounded ${
+                className={`self-start sm:self-auto flex-shrink-0 px-2.5 py-1.5 text-xs font-bold rounded ${
                   synthProb >
-                  0.60
+                  0.6
                     ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                    : 'bg-emerald-500/20 text-emerald-400'
+                    : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/20'
                 }`}
               >
                 {synthProb >
-                0.60
+                0.6
                   ? 'SYNTHETIC'
                   : 'REAL HUMAN'}
               </div>
+
             </div>
 
-            <div className="flex items-center justify-between bg-[#192233] p-3 rounded-lg border border-[#26334D]">
-              <div>
+            {/* SPEAKER MATCH */}
+
+            <div className="w-full min-w-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-[#192233] p-3 rounded-lg border border-[#26334D]">
+
+              <div className="min-w-0">
                 <div className="text-xs text-gray-400">
                   Speaker Biometric Match
                 </div>
@@ -1257,43 +1324,63 @@ export const LiveMonitorView: React.FC = () => {
               </div>
 
               <div
-                className={`px-2.5 py-1 text-xs font-bold rounded ${getSpeakerStatusClass()}`}
+                className={`self-start sm:self-auto flex-shrink-0 px-2.5 py-1.5 text-xs font-bold rounded ${getSpeakerStatusClass()}`}
               >
                 {getSpeakerStatusLabel()}
               </div>
+
             </div>
 
-            <div className="flex items-center justify-between bg-[#192233] p-3 rounded-lg border border-[#26334D]">
-              <div>
+            {/* IMPERSONATION */}
+
+            <div className="w-full min-w-0 flex items-center justify-between gap-3 bg-[#192233] p-3 rounded-lg border border-[#26334D]">
+
+              <div className="min-w-0">
                 <div className="text-xs text-gray-400">
                   Impersonation Context
                 </div>
 
-                <div className="text-sm font-bold font-mono text-amber-400">
+                <div className="text-sm font-bold font-mono text-amber-400 break-words">
                   {impersonation}
                 </div>
               </div>
 
-              <Zap className="w-4 h-4 text-amber-400" />
+              <Zap className="w-4 h-4 text-amber-400 flex-shrink-0" />
+
             </div>
+
           </div>
+
         </div>
 
-        {/* Center Column */}
-        <div className="lg:col-span-5 space-y-6">
-          <div className="bg-[#121824] border border-[#26334D] rounded-xl p-6 flex flex-col items-center justify-center text-center">
+        {/* ===================================================
+            CENTER COLUMN
+            =================================================== */}
+
+        <div className="lg:col-span-5 space-y-4 md:space-y-6 min-w-0">
+
+          {/* RISK */}
+
+          <div className="w-full min-w-0 bg-[#121824] border border-[#26334D] rounded-xl p-4 sm:p-6 flex flex-col items-center justify-center text-center">
+
             <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider font-mono mb-2">
-              DYNAMIC RISK EVALUATION
+              Dynamic Risk Evaluation
             </h3>
 
-            <RiskGauge
-              score={riskScore}
-              level={riskLevel}
-              size={210}
-            />
+            <div className="w-full flex justify-center overflow-hidden">
+
+              <RiskGauge
+                score={riskScore}
+                level={riskLevel}
+                size={210}
+              />
+
+            </div>
+
+            {/* RECOMMENDED ACTION */}
 
             <div
-              className={`mt-6 w-full p-4 rounded-xl border text-left flex items-start space-x-3 ${
+              className={`mt-5 w-full min-w-0 p-3 sm:p-4 rounded-xl border text-left flex items-start gap-3 ${
                 riskLevel ===
                 'CRITICAL'
                   ? 'bg-red-500/10 border-red-500/40 text-red-300'
@@ -1303,142 +1390,206 @@ export const LiveMonitorView: React.FC = () => {
                   : 'bg-blue-500/10 border-blue-500/30 text-blue-300'
               }`}
             >
+
               <ShieldAlert className="w-5 h-5 flex-shrink-0 mt-0.5" />
 
-              <div>
+              <div className="min-w-0">
+
                 <div className="text-xs font-bold uppercase tracking-wider">
-                  RECOMMENDED ACTION:
+                  Recommended Action:
                 </div>
 
-                <div className="text-xs mt-1 leading-relaxed">
+                <div className="text-xs mt-1 leading-relaxed break-words">
                   {recommendedAction}
                 </div>
+
               </div>
+
             </div>
+
           </div>
 
-          <div className="bg-[#121824] border border-[#26334D] rounded-xl p-5">
+          {/* RISK TIMELINE */}
+
+          <div className="w-full min-w-0 bg-[#121824] border border-[#26334D] rounded-xl p-4 sm:p-5">
+
             <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider font-mono mb-3">
               Conversation Risk Timeline
             </h3>
 
-            <div className="h-36">
-              <ResponsiveContainer
-                width="100%"
-                height="100%"
-              >
-                <LineChart
-                  data={timelineData}
-                >
-                  <XAxis
-                    dataKey="time"
-                    stroke="#4B5563"
-                    tick={{
-                      fontSize: 10,
-                    }}
-                  />
+            <div className="w-full h-40 min-w-0">
 
-                  <YAxis
-                    domain={[0, 100]}
-                    stroke="#4B5563"
-                    tick={{
-                      fontSize: 10,
-                    }}
-                  />
-
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor:
-                        '#192233',
-                      borderColor:
-                        '#26334D',
-                    }}
-                  />
-
-                  <Line
-                    type="monotone"
-                    dataKey="score"
-                    stroke={
-                      riskScore > 60
-                        ? '#EF4444'
-                        : '#3B82F6'
-                    }
-                    strokeWidth={3}
-                    dot={{
-                      r: 4,
-                    }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column */}
-        <div className="lg:col-span-3 bg-[#121824] border border-[#26334D] rounded-xl p-5 flex flex-col justify-between h-full">
-          <div>
-            <h3 className="text-xs font-semibold text-gray-300 uppercase tracking-wider font-mono border-b border-[#26334D] pb-2 mb-4">
-              Live Speech-to-Text Transcript
-            </h3>
-
-            <div className="space-y-4 max-h-[460px] overflow-y-auto pr-1">
-              {transcriptUtterances.length ===
+              {timelineData.length ===
               0 ? (
-                <div className="bg-[#192233] p-3 rounded-lg border border-[#26334D]">
-                  <p className="text-xs text-gray-500 leading-relaxed">
-                    {isRecording
-                      ? 'Listening for speech...'
-                      : 'Start the microphone monitor to begin live transcription.'}
-                  </p>
+                <div className="h-full flex items-center justify-center text-xs text-gray-500 border border-[#26334D] rounded-lg bg-[#0B0F17]">
+                  Risk timeline will appear during live analysis.
                 </div>
               ) : (
-                transcriptUtterances.map(
-                  (u) => (
-                    <div
-                      key={u.id}
-                      className="bg-[#192233] p-3 rounded-lg border border-[#26334D] space-y-2"
-                    >
-                      <div className="flex items-center justify-between text-[10px] font-mono text-gray-400">
-                        <span className="font-bold text-blue-400">
-                          {u.speaker}
-                        </span>
+                <ResponsiveContainer
+                  width="100%"
+                  height="100%"
+                >
+                  <LineChart
+                    data={timelineData}
+                    margin={{
+                      top: 5,
+                      right: 5,
+                      left: -20,
+                      bottom: 0,
+                    }}
+                  >
 
-                        <span>
-                          16kHz Mono
-                        </span>
-                      </div>
+                    <XAxis
+                      dataKey="time"
+                      stroke="#4B5563"
+                      tick={{
+                        fontSize: 9,
+                      }}
+                    />
 
-                      <p className="text-xs text-gray-200 leading-relaxed font-sans">
-                        {u.text}
-                      </p>
+                    <YAxis
+                      domain={[0, 100]}
+                      stroke="#4B5563"
+                      tick={{
+                        fontSize: 9,
+                      }}
+                    />
 
-                      {u.flags &&
-                        u.flags.length >
-                          0 && (
-                          <div className="flex flex-wrap gap-1 pt-1">
-                            {u.flags.map(
-                              (
-                                flag
-                              ) => (
-                                <span
-                                  key={
-                                    flag
-                                  }
-                                  className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-red-400 font-mono"
-                                >
-                                  {flag}
-                                </span>
-                              )
-                            )}
-                          </div>
-                        )}
-                    </div>
-                  )
-                )
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor:
+                          '#192233',
+                        borderColor:
+                          '#26334D',
+                        borderRadius:
+                          '8px',
+                        fontSize:
+                          '11px',
+                      }}
+                    />
+
+                    <Line
+                      type="monotone"
+                      dataKey="score"
+                      stroke={
+                        riskScore > 60
+                          ? '#EF4444'
+                          : '#3B82F6'
+                      }
+                      strokeWidth={3}
+                      dot={{
+                        r: 3,
+                      }}
+                      activeDot={{
+                        r: 5,
+                      }}
+                    />
+
+                  </LineChart>
+                </ResponsiveContainer>
               )}
+
             </div>
+
           </div>
+
         </div>
+
+        {/* ===================================================
+            RIGHT COLUMN
+            =================================================== */}
+
+        <div className="lg:col-span-3 min-w-0 bg-[#121824] border border-[#26334D] rounded-xl p-4 sm:p-5">
+
+          <div className="flex flex-col gap-3 mb-4">
+
+            <div className="flex items-center justify-between gap-3">
+
+              <h3 className="min-w-0 text-xs font-semibold text-gray-300 uppercase tracking-wider font-mono">
+                Live Speech-to-Text Transcript
+              </h3>
+
+              {isRecording && (
+                <span className="flex-shrink-0 text-[9px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded">
+                  LIVE
+                </span>
+              )}
+
+            </div>
+
+            <div className="h-px bg-[#26334D]" />
+
+          </div>
+
+          <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+
+            {transcriptUtterances.length ===
+            0 ? (
+              <div className="bg-[#192233] p-3 rounded-lg border border-[#26334D]">
+
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  {isRecording
+                    ? 'Listening for speech...'
+                    : 'Start the microphone monitor to begin live transcription.'}
+                </p>
+
+              </div>
+            ) : (
+              transcriptUtterances.map(
+                (u) => (
+                  <div
+                    key={u.id}
+                    className="w-full min-w-0 bg-[#192233] p-3 rounded-lg border border-[#26334D] space-y-2"
+                  >
+
+                    <div className="flex items-center justify-between gap-2 text-[10px] font-mono text-gray-400">
+
+                      <span className="font-bold text-blue-400">
+                        {u.speaker}
+                      </span>
+
+                      <span className="flex-shrink-0">
+                        16kHz Mono
+                      </span>
+
+                    </div>
+
+                    <p className="text-xs text-gray-200 leading-relaxed font-sans break-words">
+                      {u.text}
+                    </p>
+
+                    {u.flags &&
+                      u.flags.length >
+                        0 && (
+                        <div className="flex flex-wrap gap-1 pt-1">
+
+                          {u.flags.map(
+                            (
+                              flag
+                            ) => (
+                              <span
+                                key={
+                                  flag
+                                }
+                                className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-red-400 font-mono break-all"
+                              >
+                                {flag}
+                              </span>
+                            )
+                          )}
+
+                        </div>
+                      )}
+
+                  </div>
+                )
+              )
+            )}
+
+          </div>
+
+        </div>
+
       </div>
     </div>
   );
