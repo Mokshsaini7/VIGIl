@@ -21,7 +21,7 @@ export const LogoView: React.FC<LogoViewProps> = ({
       }}
     >
       <Image
-        src="/VIGIL.png"
+        src="public/VIGIL.png"
         alt="VIGIL Logo"
         width={size}
         height={size}
