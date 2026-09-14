@@ -2,35 +2,46 @@
 
 import React, { useEffect, useState } from 'react';
 
-import { Sidebar } from '@/components/Sidebar';
-import { Header } from '@/components/Header';
-
-import { OverviewView } from '@/components/OverviewView';
-import { LiveMonitorView } from '@/components/LiveMonitorView';
-import { AnalyzeView } from '@/components/AnalyzeView';
-import { SpeakerVerificationView } from '@/components/SpeakerVerificationView';
-import { ThreatIntelView } from '@/components/ThreatIntelView';
-import { AlertsView } from '@/components/AlertsView';
-import { SessionsView } from '@/components/SessionsView';
-import { DemoModeView } from '@/components/DemoModeView';
-import { AnalyticsView } from '@/components/AnalyticsView';
-import { SettingsView } from '@/components/SettingsView';
-
-import { LoginView } from '@/components/LoginView';
-import { SignupView } from '@/components/SignupView';
+import {
+  Settings,
+  User,
+  ShieldCheck,
+  Sliders,
+  Database,
+  Lock,
+  CheckCircle2,
+  LogOut,
+  Mail,
+  Shield,
+  Activity,
+  Server,
+  Info,
+  Users,
+  Target,
+  Cpu,
+  Globe,
+  KeyRound,
+  RefreshCw,
+  AlertCircle,
+} from 'lucide-react';
 
 /* =========================================================
    TYPES
    ========================================================= */
 
-export type AuthUser = {
+interface SettingsUser {
   id?: number | string;
   username: string;
   email?: string;
   role: string;
   is_active?: boolean;
   token: string;
-};
+}
+
+interface SettingsViewProps {
+  user: SettingsUser | null;
+  onLogout?: () => void;
+}
 
 /* =========================================================
    API
@@ -41,721 +52,1279 @@ const API_HOST =
   'http://localhost:8000';
 
 /* =========================================================
-   HOME
+   COMPONENT
    ========================================================= */
 
-export default function Home() {
+export const SettingsView: React.FC<
+  SettingsViewProps
+> = ({ user, onLogout }) => {
   /* =======================================================
-     ACTIVE TAB
+     RISK SETTINGS
      ======================================================= */
 
-  const [activeTab, setActiveTab] =
-    useState('overview');
+  const [syntheticThreshold, setSyntheticThreshold] =
+    useState(65);
 
-  /* =======================================================
-     AUTHENTICATION
-     ======================================================= */
+  const [mismatchThreshold, setMismatchThreshold] =
+    useState(72);
 
-  const [authUser, setAuthUser] =
-    useState<AuthUser | null>(null);
+  const [urgencyWeight, setUrgencyWeight] =
+    useState(15);
 
-  const [authMode, setAuthMode] =
-    useState<'login' | 'signup'>('login');
-
-  const [initialized, setInitialized] =
+  const [savedSuccess, setSavedSuccess] =
     useState(false);
 
   /* =======================================================
-     MOBILE SIDEBAR
+     PASSWORD
      ======================================================= */
 
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] =
+  const [oldPassword, setOldPassword] =
+    useState('');
+
+  const [newPassword, setNewPassword] =
+    useState('');
+
+  const [confirmPassword, setConfirmPassword] =
+    useState('');
+
+  const [pwdLoading, setPwdLoading] =
     useState(false);
 
+  const [pwdSuccess, setPwdSuccess] =
+    useState(false);
+
+  const [pwdError, setPwdError] =
+    useState('');
+
   /* =======================================================
-     LOGOUT
+     SYSTEM STATUS
      ======================================================= */
 
-  const handleLogout = () => {
+  const [backendStatus, setBackendStatus] =
+    useState<'checking' | 'online' | 'offline'>(
+      'checking'
+    );
+
+  const [databaseStatus, setDatabaseStatus] =
+    useState<'checking' | 'online' | 'offline'>(
+      'checking'
+    );
+
+  const [lastChecked, setLastChecked] =
+    useState('');
+
+  /* =======================================================
+     CHECK SYSTEM STATUS
+     ======================================================= */
+
+  const checkSystemStatus = async () => {
+    setBackendStatus('checking');
+    setDatabaseStatus('checking');
+
     try {
-      localStorage.removeItem('vigil_token');
-      localStorage.removeItem('vigil_user');
-    } catch (error) {
-      console.error(
-        'Failed to clear VIGIL session:',
-        error
-      );
-    }
-
-    setAuthUser(null);
-    setAuthMode('login');
-    setActiveTab('overview');
-    setIsMobileSidebarOpen(false);
-  };
-
-  /* =======================================================
-     RESTORE LOGIN SESSION
-     ======================================================= */
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const restoreSession = async () => {
-      try {
-        const token =
-          localStorage.getItem('vigil_token');
-
-        const storedUserString =
-          localStorage.getItem('vigil_user');
-
-        /* ---------------------------------------------------
-           No stored login
-           --------------------------------------------------- */
-
-        if (!token || !storedUserString) {
-          if (!cancelled) {
-            setInitialized(true);
+      const backendResponse =
+        await fetch(
+          `${API_HOST}/health`,
+          {
+            method: 'GET',
+            cache: 'no-store',
           }
-
-          return;
-        }
-
-        /* ---------------------------------------------------
-           Parse stored user
-           --------------------------------------------------- */
-
-        let storedUser: any;
-
-        try {
-          storedUser =
-            JSON.parse(storedUserString);
-        } catch (error) {
-          console.error(
-            'Invalid stored VIGIL user:',
-            error
-          );
-
-          localStorage.removeItem(
-            'vigil_token'
-          );
-
-          localStorage.removeItem(
-            'vigil_user'
-          );
-
-          if (!cancelled) {
-            setAuthUser(null);
-            setInitialized(true);
-          }
-
-          return;
-        }
-
-        /* ---------------------------------------------------
-           Restore immediately from local storage
-           --------------------------------------------------- */
-
-        if (!cancelled) {
-          setAuthUser({
-            id: storedUser?.id,
-            username:
-              storedUser?.username || 'User',
-            email:
-              storedUser?.email || '',
-            role:
-              storedUser?.role || 'ANALYST',
-            is_active:
-              storedUser?.is_active ?? true,
-            token,
-          });
-        }
-
-        /* ---------------------------------------------------
-           Verify session with backend
-           --------------------------------------------------- */
-
-        try {
-          const response = await fetch(
-            `${API_HOST}/api/auth/me`,
-            {
-              method: 'GET',
-              headers: {
-                Authorization:
-                  `Bearer ${token}`,
-                Accept: 'application/json',
-              },
-            }
-          );
-
-          /* -------------------------------------------------
-             Token expired / invalid
-             ------------------------------------------------- */
-
-          if (response.status === 401) {
-            localStorage.removeItem(
-              'vigil_token'
-            );
-
-            localStorage.removeItem(
-              'vigil_user'
-            );
-
-            if (!cancelled) {
-              setAuthUser(null);
-            }
-
-            return;
-          }
-
-          /* -------------------------------------------------
-             Valid backend user
-             ------------------------------------------------- */
-
-          if (response.ok) {
-            const backendUser =
-              await response.json();
-
-            const completeUser: AuthUser = {
-              id:
-                backendUser?.id ??
-                storedUser?.id,
-
-              username:
-                backendUser?.username ??
-                storedUser?.username ??
-                'User',
-
-              email:
-                backendUser?.email ??
-                storedUser?.email ??
-                '',
-
-              role:
-                backendUser?.role ??
-                storedUser?.role ??
-                'ANALYST',
-
-              is_active:
-                backendUser?.is_active ??
-                storedUser?.is_active ??
-                true,
-
-              token,
-            };
-
-            if (!cancelled) {
-              setAuthUser(completeUser);
-            }
-
-            /* -----------------------------------------------
-               Keep complete user in local storage
-               ----------------------------------------------- */
-
-            localStorage.setItem(
-              'vigil_user',
-              JSON.stringify({
-                id: completeUser.id,
-                username:
-                  completeUser.username,
-                email:
-                  completeUser.email,
-                role:
-                  completeUser.role,
-                is_active:
-                  completeUser.is_active,
-              })
-            );
-          }
-        } catch (error) {
-          /*
-           * Backend may temporarily be unavailable.
-           *
-           * We intentionally keep the locally restored
-           * session instead of logging the user out.
-           */
-
-          console.warn(
-            'Could not verify VIGIL session:',
-            error
-          );
-        }
-      } catch (error) {
-        console.error(
-          'Failed to restore VIGIL session:',
-          error
         );
 
-        if (!cancelled) {
-          setAuthUser(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setInitialized(true);
-        }
-      }
-    };
+      setBackendStatus(
+        backendResponse.ok
+          ? 'online'
+          : 'offline'
+      );
+    } catch {
+      setBackendStatus('offline');
+    }
 
-    restoreSession();
+    try {
+      const databaseResponse =
+        await fetch(
+          `${API_HOST}/health/db`,
+          {
+            method: 'GET',
+            cache: 'no-store',
+          }
+        );
 
-    return () => {
-      cancelled = true;
-    };
+      setDatabaseStatus(
+        databaseResponse.ok
+          ? 'online'
+          : 'offline'
+      );
+    } catch {
+      setDatabaseStatus('offline');
+    }
+
+    setLastChecked(
+      new Date().toLocaleTimeString()
+    );
+  };
+
+  useEffect(() => {
+    checkSystemStatus();
   }, []);
 
   /* =======================================================
-     CHANGE TAB
+     SAVE RISK CONFIGURATION
      ======================================================= */
 
-  const handleSetActiveTab = (
-    tab: string
+  const handleSaveSettings = (
+    event: React.FormEvent
   ) => {
-    setActiveTab(tab);
-    setIsMobileSidebarOpen(false);
-  };
+    event.preventDefault();
 
-  /* =======================================================
-     LOGIN / SIGNUP SUCCESS
-     ======================================================= */
-
-  const handleAuthSuccess = (user: {
-    username: string;
-    role: string;
-    token: string;
-    email?: string;
-    id?: number | string;
-    is_active?: boolean;
-  }) => {
-    const completeUser: AuthUser = {
-      id: user.id,
-
-      username:
-        user.username || 'User',
-
-      email:
-        user.email || '',
-
-      role:
-        user.role || 'ANALYST',
-
-      is_active:
-        user.is_active ?? true,
-
-      token: user.token,
-    };
-
-    /* -----------------------------------------------------
-       Update React state
-       ----------------------------------------------------- */
-
-    setAuthUser(completeUser);
-
-    /* -----------------------------------------------------
-       Save token
-       ----------------------------------------------------- */
+    /*
+     * These settings are currently maintained locally
+     * because the backend settings endpoint has not yet
+     * been added.
+     */
 
     try {
       localStorage.setItem(
-        'vigil_token',
-        completeUser.token
-      );
-
-      localStorage.setItem(
-        'vigil_user',
+        'vigil_risk_settings',
         JSON.stringify({
-          id: completeUser.id,
-          username:
-            completeUser.username,
-          email:
-            completeUser.email,
-          role:
-            completeUser.role,
-          is_active:
-            completeUser.is_active,
+          syntheticThreshold,
+          mismatchThreshold,
+          urgencyWeight,
         })
       );
-    } catch (error) {
-      console.error(
-        'Failed to save VIGIL session:',
-        error
-      );
+    } catch {
+      // Ignore local storage failures.
     }
 
-    /* -----------------------------------------------------
-       Return to dashboard
-       ----------------------------------------------------- */
+    setSavedSuccess(true);
 
-    setActiveTab('overview');
-    setIsMobileSidebarOpen(false);
+    window.setTimeout(() => {
+      setSavedSuccess(false);
+    }, 3000);
   };
 
   /* =======================================================
-     INITIAL LOADING
+     RESTORE RISK SETTINGS
      ======================================================= */
 
-  if (!initialized) {
-    return (
-      <div
-        className="
-          min-h-screen
-          w-full
-          bg-[#0B0F17]
-          flex
-          items-center
-          justify-center
-          text-gray-400
-        "
-      >
-        <div className="text-center">
+  useEffect(() => {
+    try {
+      const saved =
+        localStorage.getItem(
+          'vigil_risk_settings'
+        );
 
-          <div
-            className="
-              mb-4
-              text-2xl
-              font-black
-              tracking-[0.25em]
-              text-white
-            "
-          >
-            VIGIL
-          </div>
+      if (!saved) return;
 
-          <div
-            className="
-              mb-4
-              text-sm
-              text-gray-500
-            "
-          >
-            Initializing Voice Security Center...
-          </div>
+      const parsed =
+        JSON.parse(saved);
 
-          <div
-            className="
-              mx-auto
-              h-1
-              w-32
-              overflow-hidden
-              rounded-full
-              bg-gray-800
-            "
-          >
-            <div
-              className="
-                h-full
-                w-1/2
-                animate-pulse
-                rounded-full
-                bg-cyan-400
-              "
-            />
-          </div>
+      if (
+        typeof parsed.syntheticThreshold ===
+        'number'
+      ) {
+        setSyntheticThreshold(
+          parsed.syntheticThreshold
+        );
+      }
 
-        </div>
-      </div>
-    );
-  }
+      if (
+        typeof parsed.mismatchThreshold ===
+        'number'
+      ) {
+        setMismatchThreshold(
+          parsed.mismatchThreshold
+        );
+      }
 
-  /* =======================================================
-     LOGIN / SIGNUP
-     ======================================================= */
-
-  if (!authUser) {
-    if (authMode === 'login') {
-      return (
-        <LoginView
-          onLoginSuccess={
-            handleAuthSuccess
-          }
-          onSwitchToSignup={() =>
-            setAuthMode('signup')
-          }
-        />
-      );
+      if (
+        typeof parsed.urgencyWeight ===
+        'number'
+      ) {
+        setUrgencyWeight(
+          parsed.urgencyWeight
+        );
+      }
+    } catch {
+      // Ignore invalid saved settings.
     }
-
-    return (
-      <SignupView
-        onSignupSuccess={
-          handleAuthSuccess
-        }
-        onSwitchToLogin={() =>
-          setAuthMode('login')
-        }
-      />
-    );
-  }
+  }, []);
 
   /* =======================================================
-     PAGE TITLE
+     PASSWORD CHANGE
      ======================================================= */
 
-  const getTabTitle = (
-    tab: string
+  const handlePasswordChange = async (
+    event: React.FormEvent
   ) => {
-    switch (tab) {
-      case 'overview':
-        return 'Overview Dashboard';
+    event.preventDefault();
 
-      case 'live-monitor':
-        return 'Live Monitor & Voice Intelligence';
+    setPwdError('');
+    setPwdSuccess(false);
 
-      case 'analyze':
-        return 'Analyze Audio File';
+    if (!oldPassword || !newPassword) {
+      setPwdError(
+        'Please enter your current and new password.'
+      );
+      return;
+    }
 
-      case 'speaker-verify':
-        return 'Speaker Verification & Profiles';
+    if (newPassword.length < 6) {
+      setPwdError(
+        'New password must contain at least 6 characters.'
+      );
+      return;
+    }
 
-      case 'threat-intel':
-        return 'Threat Intelligence Center';
+    if (newPassword !== confirmPassword) {
+      setPwdError(
+        'New password and confirmation do not match.'
+      );
+      return;
+    }
 
-      case 'sessions':
-        return 'Session History Archive';
+    if (!user?.token) {
+      setPwdError(
+        'Your session is not available. Please login again.'
+      );
+      return;
+    }
 
-      case 'alerts':
-        return 'Security Operations Alert Center';
+    setPwdLoading(true);
 
-      case 'analytics':
-        return 'Analytics & System Performance';
+    try {
+      const response =
+        await fetch(
+          `${API_HOST}/api/auth/change-password`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type':
+                'application/json',
 
-      case 'demo-mode':
-        return 'Smart India Hackathon 2026 Interactive Demo';
+              Authorization:
+                `Bearer ${user.token}`,
+            },
+            body: JSON.stringify({
+              current_password:
+                oldPassword,
 
-      case 'settings':
-        return 'System Settings & Controls';
+              new_password:
+                newPassword,
+            }),
+          }
+        );
 
-      default:
-        return 'Voice Intelligence Center';
+      const data =
+        await response
+          .json()
+          .catch(() => null);
+
+      if (!response.ok) {
+        setPwdError(
+          data?.detail ||
+            'Unable to change password.'
+        );
+
+        return;
+      }
+
+      setPwdSuccess(true);
+
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+
+      window.setTimeout(() => {
+        setPwdSuccess(false);
+      }, 4000);
+    } catch {
+      setPwdError(
+        'Unable to connect to the VIGIL backend.'
+      );
+    } finally {
+      setPwdLoading(false);
     }
   };
 
   /* =======================================================
-     RENDER CONTENT
+     USER DISPLAY DATA
      ======================================================= */
 
-  const renderContent = () => {
-    switch (activeTab) {
-      case 'overview':
-        return (
-          <OverviewView
-            onNavigate={
-              handleSetActiveTab
-            }
-          />
-        );
+  const username =
+    user?.username || 'Authenticated User';
 
-      case 'live-monitor':
-        return (
-          <LiveMonitorView />
-        );
+  const email =
+    user?.email || 'Email not available';
 
-      case 'analyze':
-        return (
-          <AnalyzeView />
-        );
+  const role =
+    user?.role || 'ANALYST';
 
-      case 'speaker-verify':
-        return (
-          <SpeakerVerificationView />
-        );
+  const accountActive =
+    user?.is_active ?? true;
 
-      case 'threat-intel':
-        return (
-          <ThreatIntelView />
-        );
+  const initials =
+    username
+      .split(' ')
+      .filter(Boolean)
+      .map(
+        (part) =>
+          part.charAt(0).toUpperCase()
+      )
+      .slice(0, 2)
+      .join('') || 'VU';
 
-      case 'sessions':
-        return (
-          <SessionsView />
-        );
+  /* =======================================================
+     STATUS COMPONENT
+     ======================================================= */
 
-      case 'alerts':
-        return (
-          <AlertsView />
-        );
-
-      case 'demo-mode':
-        return (
-          <DemoModeView />
-        );
-
-      case 'analytics':
-        return (
-          <AnalyticsView
-            user={authUser}
-          />
-        );
-
-      case 'settings':
-        return (
-          <SettingsView
-            user={authUser}
-            onLogout={handleLogout}
-          />
-        );
-
-      default:
-        return (
-          <OverviewView
-            onNavigate={
-              handleSetActiveTab
-            }
-          />
-        );
+  const StatusBadge = ({
+    status,
+  }: {
+    status:
+      | 'checking'
+      | 'online'
+      | 'offline';
+  }) => {
+    if (status === 'checking') {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold text-amber-400">
+          <RefreshCw className="h-3 w-3 animate-spin" />
+          CHECKING
+        </span>
+      );
     }
+
+    if (status === 'online') {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-400">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+          ONLINE
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-[10px] font-semibold text-red-400">
+        <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
+        OFFLINE
+      </span>
+    );
   };
 
   /* =======================================================
-     MAIN APPLICATION
+     RENDER
      ======================================================= */
 
   return (
-    <div
-      className="
-        min-h-screen
-        w-full
-        overflow-x-hidden
-        bg-[#0B0F17]
-        text-gray-100
-      "
-    >
+    <div className="w-full min-w-0 p-4 sm:p-6">
 
       {/* =================================================
-          MOBILE SIDEBAR BACKDROP
+          PAGE HEADER
       ================================================= */}
 
-      {isMobileSidebarOpen && (
-        <button
-          type="button"
-          aria-label="Close navigation menu"
-          onClick={() =>
-            setIsMobileSidebarOpen(false)
-          }
-          className="
-            fixed
-            inset-0
-            z-40
-            bg-black/60
-            backdrop-blur-sm
-            lg:hidden
-          "
-        />
-      )}
+      <div className="mb-6 border-b border-[#26334D] pb-5">
 
-      {/* =================================================
-          APPLICATION LAYOUT
-      ================================================= */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 
-      <div
-        className="
-          flex
-          min-h-screen
-          w-full
-        "
-      >
+          <div>
+            <div className="mb-2 flex items-center gap-2">
+              <div className="rounded-lg bg-blue-500/10 p-2">
+                <Settings className="h-5 w-5 text-blue-400" />
+              </div>
 
-        {/* =================================================
-            SIDEBAR
-        ================================================= */}
+              <h1 className="text-xl font-bold text-white sm:text-2xl">
+                System Settings
+              </h1>
+            </div>
 
-        <div
-          className={`
-            fixed
-            inset-y-0
-            left-0
-            z-50
-            w-[280px]
-            max-w-[85vw]
-            transform
-            transition-transform
-            duration-300
-            ease-in-out
+            <p className="max-w-2xl text-xs leading-5 text-gray-400 sm:text-sm">
+              Manage your VIGIL account, security
+              configuration, authentication and
+              system preferences.
+            </p>
+          </div>
 
-            lg:relative
-            lg:translate-x-0
-            lg:w-64
-            lg:max-w-none
+          <div className="flex items-center gap-2 rounded-xl border border-[#26334D] bg-[#121824] px-3 py-2">
+            <Activity className="h-4 w-4 text-emerald-400" />
 
-            ${
-              isMobileSidebarOpen
-                ? 'translate-x-0'
-                : '-translate-x-full lg:translate-x-0'
-            }
-          `}
-        >
-          <Sidebar
-            activeTab={
-              activeTab
-            }
+            <div>
+              <div className="text-[9px] uppercase tracking-wider text-gray-500">
+                Session
+              </div>
 
-            setActiveTab={
-              handleSetActiveTab
-            }
-
-            isOpenMobile={
-              isMobileSidebarOpen
-            }
-
-            onCloseMobile={() =>
-              setIsMobileSidebarOpen(
-                false
-              )
-            }
-          />
-        </div>
-
-        {/* =================================================
-            MAIN CONTENT AREA
-        ================================================= */}
-
-        <div
-          className="
-            flex
-            min-w-0
-            flex-1
-            flex-col
-          "
-        >
-
-          {/* =================================================
-              HEADER
-          ================================================= */}
-
-          <Header
-            title={
-              getTabTitle(activeTab)
-            }
-
-            user={authUser}
-
-            onLogout={
-              handleLogout
-            }
-
-            onToggleMobileSidebar={() =>
-              setIsMobileSidebarOpen(
-                previous =>
-                  !previous
-              )
-            }
-          />
-
-          {/* =================================================
-              PAGE CONTENT
-          ================================================= */}
-
-          <main
-            className="
-              min-w-0
-              w-full
-              flex-1
-              overflow-x-hidden
-            "
-          >
-            {renderContent()}
-          </main>
+              <div className="text-xs font-semibold text-emerald-400">
+                ACTIVE
+              </div>
+            </div>
+          </div>
 
         </div>
       </div>
+
+      {/* =================================================
+          PROFILE + SECURITY
+      ================================================= */}
+
+      <div className="grid w-full grid-cols-1 gap-5 xl:grid-cols-2">
+
+        {/* =================================================
+            MY PROFILE
+        ================================================= */}
+
+        <section className="rounded-2xl border border-[#26334D] bg-[#121824] p-5 shadow-xl">
+
+          <div className="mb-5 flex items-center justify-between border-b border-[#26334D] pb-4">
+
+            <div className="flex items-center gap-2">
+              <User className="h-4 w-4 text-blue-400" />
+
+              <h2 className="text-sm font-bold text-white">
+                My Profile
+              </h2>
+            </div>
+
+            <span className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[9px] font-bold text-emerald-400">
+              VERIFIED SESSION
+            </span>
+
+          </div>
+
+          {/* PROFILE HERO */}
+
+          <div className="mb-5 flex items-center gap-4 rounded-xl border border-[#26334D] bg-[#192233] p-4">
+
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-blue-400/30 bg-blue-500/10 text-xl font-black text-blue-400">
+              {initials}
+            </div>
+
+            <div className="min-w-0">
+              <h3 className="truncate text-lg font-bold text-white">
+                {username}
+              </h3>
+
+              <div className="mt-1 flex items-center gap-2 text-xs text-gray-400">
+                <Mail className="h-3.5 w-3.5" />
+                <span className="truncate">
+                  {email}
+                </span>
+              </div>
+
+              <div className="mt-2 flex flex-wrap gap-2">
+
+                <span className="rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[9px] font-bold text-blue-400">
+                  {role}
+                </span>
+
+                {accountActive ? (
+                  <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[9px] font-bold text-emerald-400">
+                    ACCOUNT ACTIVE
+                  </span>
+                ) : (
+                  <span className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-[9px] font-bold text-red-400">
+                    ACCOUNT INACTIVE
+                  </span>
+                )}
+
+              </div>
+            </div>
+          </div>
+
+          {/* ACCOUNT DETAILS */}
+
+          <div className="space-y-2">
+
+            <div className="flex items-center justify-between rounded-lg border border-[#26334D] bg-[#192233] px-3 py-3">
+              <div className="flex items-center gap-2">
+                <User className="h-3.5 w-3.5 text-gray-500" />
+                <span className="text-xs text-gray-400">
+                  Username
+                </span>
+              </div>
+
+              <span className="max-w-[55%] truncate text-xs font-semibold text-white">
+                {username}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-[#26334D] bg-[#192233] px-3 py-3">
+              <div className="flex items-center gap-2">
+                <Mail className="h-3.5 w-3.5 text-gray-500" />
+                <span className="text-xs text-gray-400">
+                  Email
+                </span>
+              </div>
+
+              <span className="max-w-[55%] truncate text-xs font-semibold text-white">
+                {email}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-[#26334D] bg-[#192233] px-3 py-3">
+              <div className="flex items-center gap-2">
+                <Shield className="h-3.5 w-3.5 text-gray-500" />
+                <span className="text-xs text-gray-400">
+                  Security Role
+                </span>
+              </div>
+
+              <span className="rounded-md bg-blue-500/10 px-2 py-1 text-[10px] font-bold text-blue-400">
+                {role}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-[#26334D] bg-[#192233] px-3 py-3">
+              <div className="flex items-center gap-2">
+                <KeyRound className="h-3.5 w-3.5 text-gray-500" />
+                <span className="text-xs text-gray-400">
+                  Authentication
+                </span>
+              </div>
+
+              <span className="text-xs font-semibold text-emerald-400">
+                JWT ACTIVE
+              </span>
+            </div>
+
+          </div>
+
+          {/* LOGOUT */}
+
+          {onLogout && (
+            <button
+              type="button"
+              onClick={onLogout}
+              className="
+                mt-5
+                flex
+                w-full
+                items-center
+                justify-center
+                gap-2
+                rounded-xl
+                border
+                border-red-500/30
+                bg-red-500/10
+                px-4
+                py-3
+                text-xs
+                font-bold
+                text-red-400
+                transition
+                hover:border-red-500/50
+                hover:bg-red-500/20
+                hover:text-red-300
+              "
+            >
+              <LogOut className="h-4 w-4" />
+              LOG OUT OF VIGIL
+            </button>
+          )}
+
+        </section>
+
+        {/* =================================================
+            PASSWORD SECURITY
+        ================================================= */}
+
+        <section className="rounded-2xl border border-[#26334D] bg-[#121824] p-5 shadow-xl">
+
+          <div className="mb-5 border-b border-[#26334D] pb-4">
+
+            <div className="flex items-center gap-2">
+              <Lock className="h-4 w-4 text-purple-400" />
+
+              <h2 className="text-sm font-bold text-white">
+                Account Security
+              </h2>
+            </div>
+
+            <p className="mt-1 text-[11px] text-gray-500">
+              Update your VIGIL account password.
+            </p>
+
+          </div>
+
+          <form
+            onSubmit={
+              handlePasswordChange
+            }
+            className="space-y-4"
+          >
+
+            <div>
+              <label className="mb-1.5 block text-[11px] font-medium text-gray-400">
+                Current Password
+              </label>
+
+              <input
+                type="password"
+                value={oldPassword}
+                onChange={(event) =>
+                  setOldPassword(
+                    event.target.value
+                  )
+                }
+                placeholder="Enter current password"
+                className="
+                  w-full
+                  rounded-xl
+                  border
+                  border-[#26334D]
+                  bg-[#192233]
+                  px-3
+                  py-3
+                  text-sm
+                  text-white
+                  outline-none
+                  transition
+                  placeholder:text-gray-600
+                  focus:border-blue-500
+                "
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-[11px] font-medium text-gray-400">
+                New Password
+              </label>
+
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(event) =>
+                  setNewPassword(
+                    event.target.value
+                  )
+                }
+                placeholder="Enter new password"
+                className="
+                  w-full
+                  rounded-xl
+                  border
+                  border-[#26334D]
+                  bg-[#192233]
+                  px-3
+                  py-3
+                  text-sm
+                  text-white
+                  outline-none
+                  transition
+                  placeholder:text-gray-600
+                  focus:border-blue-500
+                "
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-[11px] font-medium text-gray-400">
+                Confirm New Password
+              </label>
+
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(event) =>
+                  setConfirmPassword(
+                    event.target.value
+                  )
+                }
+                placeholder="Confirm new password"
+                className="
+                  w-full
+                  rounded-xl
+                  border
+                  border-[#26334D]
+                  bg-[#192233]
+                  px-3
+                  py-3
+                  text-sm
+                  text-white
+                  outline-none
+                  transition
+                  placeholder:text-gray-600
+                  focus:border-blue-500
+                "
+              />
+            </div>
+
+            {pwdError && (
+              <div className="flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{pwdError}</span>
+              </div>
+            )}
+
+            {pwdSuccess && (
+              <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-400">
+                <CheckCircle2 className="h-4 w-4" />
+                Password updated successfully.
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={pwdLoading}
+              className="
+                flex
+                w-full
+                items-center
+                justify-center
+                gap-2
+                rounded-xl
+                bg-blue-600
+                px-4
+                py-3
+                text-xs
+                font-bold
+                text-white
+                shadow-lg
+                shadow-blue-600/20
+                transition
+                hover:bg-blue-500
+                disabled:cursor-not-allowed
+                disabled:opacity-50
+              "
+            >
+              {pwdLoading ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  UPDATING...
+                </>
+              ) : (
+                <>
+                  <Lock className="h-4 w-4" />
+                  UPDATE PASSWORD
+                </>
+              )}
+            </button>
+
+          </form>
+        </section>
+
+      </div>
+
+      {/* =================================================
+          RISK ENGINE
+      ================================================= */}
+
+      <section className="mt-5 rounded-2xl border border-[#26334D] bg-[#121824] p-5 shadow-xl">
+
+        <div className="mb-5 flex flex-col gap-2 border-b border-[#26334D] pb-4 sm:flex-row sm:items-center sm:justify-between">
+
+          <div>
+            <div className="flex items-center gap-2">
+              <Sliders className="h-4 w-4 text-emerald-400" />
+
+              <h2 className="text-sm font-bold text-white">
+                AI Risk Engine Configuration
+              </h2>
+            </div>
+
+            <p className="mt-1 text-[11px] text-gray-500">
+              Configure local VIGIL risk-analysis thresholds.
+            </p>
+          </div>
+
+          <span className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 text-[9px] font-bold text-emerald-400">
+            RISK ENGINE
+          </span>
+
+        </div>
+
+        <form
+          onSubmit={
+            handleSaveSettings
+          }
+          className="space-y-6"
+        >
+
+          {/* SYNTHETIC */}
+
+          <div>
+            <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+
+              <label className="text-xs font-semibold text-gray-300">
+                Synthetic AI Voice Confidence Cutoff
+              </label>
+
+              <span className="font-mono text-sm font-bold text-blue-400">
+                {syntheticThreshold}%
+              </span>
+
+            </div>
+
+            <input
+              type="range"
+              min="50"
+              max="90"
+              value={
+                syntheticThreshold
+              }
+              onChange={(event) =>
+                setSyntheticThreshold(
+                  Number(
+                    event.target.value
+                  )
+                )
+              }
+              className="w-full cursor-pointer accent-blue-500"
+            />
+
+            <p className="mt-1 text-[10px] leading-4 text-gray-500">
+              Probability above this threshold
+              is treated as suspicious synthetic
+              voice evidence.
+            </p>
+          </div>
+
+          {/* SPEAKER */}
+
+          <div>
+            <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+
+              <label className="text-xs font-semibold text-gray-300">
+                Speaker Similarity Match Cutoff
+              </label>
+
+              <span className="font-mono text-sm font-bold text-emerald-400">
+                {mismatchThreshold}%
+              </span>
+
+            </div>
+
+            <input
+              type="range"
+              min="50"
+              max="90"
+              value={
+                mismatchThreshold
+              }
+              onChange={(event) =>
+                setMismatchThreshold(
+                  Number(
+                    event.target.value
+                  )
+                )
+              }
+              className="w-full cursor-pointer accent-emerald-500"
+            />
+
+            <p className="mt-1 text-[10px] leading-4 text-gray-500">
+              Similarity below this level can
+              indicate a speaker mismatch when
+              a trusted profile is enrolled.
+            </p>
+          </div>
+
+          {/* URGENCY */}
+
+          <div>
+            <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+
+              <label className="text-xs font-semibold text-gray-300">
+                Urgency & Secrecy Signal Weight
+              </label>
+
+              <span className="font-mono text-sm font-bold text-amber-400">
+                {urgencyWeight} pts
+              </span>
+
+            </div>
+
+            <input
+              type="range"
+              min="5"
+              max="30"
+              value={
+                urgencyWeight
+              }
+              onChange={(event) =>
+                setUrgencyWeight(
+                  Number(
+                    event.target.value
+                  )
+                )
+              }
+              className="w-full cursor-pointer accent-amber-500"
+            />
+
+            <p className="mt-1 text-[10px] leading-4 text-gray-500">
+              Weight applied to high-pressure
+              conversation signals.
+            </p>
+          </div>
+
+          <button
+            type="submit"
+            className="
+              flex
+              w-full
+              items-center
+              justify-center
+              gap-2
+              rounded-xl
+              bg-blue-600
+              px-4
+              py-3
+              text-xs
+              font-bold
+              text-white
+              shadow-lg
+              shadow-blue-600/20
+              transition
+              hover:bg-blue-500
+            "
+          >
+            <CheckCircle2 className="h-4 w-4" />
+            SAVE CONFIGURATION
+          </button>
+
+          {savedSuccess && (
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-400">
+              <CheckCircle2 className="h-4 w-4" />
+              Configuration saved locally.
+            </div>
+          )}
+
+        </form>
+      </section>
+
+      {/* =================================================
+          SYSTEM STATUS
+      ================================================= */}
+
+      <section className="mt-5 rounded-2xl border border-[#26334D] bg-[#121824] p-5 shadow-xl">
+
+        <div className="mb-5 flex flex-col gap-3 border-b border-[#26334D] pb-4 sm:flex-row sm:items-center sm:justify-between">
+
+          <div>
+            <div className="flex items-center gap-2">
+              <Database className="h-4 w-4 text-purple-400" />
+
+              <h2 className="text-sm font-bold text-white">
+                System Status
+              </h2>
+            </div>
+
+            <p className="mt-1 text-[11px] text-gray-500">
+              Live connectivity diagnostics for VIGIL infrastructure.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={checkSystemStatus}
+            className="
+              flex
+              items-center
+              justify-center
+              gap-2
+              rounded-lg
+              border
+              border-[#26334D]
+              bg-[#192233]
+              px-3
+              py-2
+              text-[10px]
+              font-bold
+              text-gray-300
+              transition
+              hover:bg-[#26334D]
+            "
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            REFRESH
+          </button>
+
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+
+          {/* BACKEND */}
+
+          <div className="rounded-xl border border-[#26334D] bg-[#192233] p-4">
+
+            <div className="mb-3 flex items-center justify-between">
+
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/10">
+                <Server className="h-4 w-4 text-blue-400" />
+              </div>
+
+              <StatusBadge
+                status={
+                  backendStatus
+                }
+              />
+
+            </div>
+
+            <div className="text-[9px] uppercase tracking-wider text-gray-500">
+              Backend API
+            </div>
+
+            <div className="mt-1 truncate text-xs font-bold text-white">
+              {API_HOST}
+            </div>
+
+          </div>
+
+          {/* DATABASE */}
+
+          <div className="rounded-xl border border-[#26334D] bg-[#192233] p-4">
+
+            <div className="mb-3 flex items-center justify-between">
+
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-purple-500/10">
+                <Database className="h-4 w-4 text-purple-400" />
+              </div>
+
+              <StatusBadge
+                status={
+                  databaseStatus
+                }
+              />
+
+            </div>
+
+            <div className="text-[9px] uppercase tracking-wider text-gray-500">
+              Database
+            </div>
+
+            <div className="mt-1 text-xs font-bold text-white">
+              PostgreSQL / SQLAlchemy
+            </div>
+
+          </div>
+
+          {/* AUTH */}
+
+          <div className="rounded-xl border border-[#26334D] bg-[#192233] p-4">
+
+            <div className="mb-3 flex items-center justify-between">
+
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10">
+                <ShieldCheck className="h-4 w-4 text-emerald-400" />
+              </div>
+
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                ACTIVE
+              </span>
+
+            </div>
+
+            <div className="text-[9px] uppercase tracking-wider text-gray-500">
+              Authentication
+            </div>
+
+            <div className="mt-1 text-xs font-bold text-white">
+              JWT Bearer Session
+            </div>
+
+          </div>
+
+        </div>
+
+        {lastChecked && (
+          <div className="mt-4 text-right text-[9px] text-gray-600">
+            Last checked: {lastChecked}
+          </div>
+        )}
+
+      </section>
+
+      {/* =================================================
+          ABOUT VIGIL
+      ================================================= */}
+
+      <section className="mt-5 overflow-hidden rounded-2xl border border-blue-500/20 bg-gradient-to-br from-[#121824] via-[#121824] to-blue-950/20 shadow-xl">
+
+        <div className="border-b border-[#26334D] p-5">
+
+          <div className="flex items-center gap-2">
+            <Info className="h-4 w-4 text-cyan-400" />
+
+            <h2 className="text-sm font-bold text-white">
+              About VIGIL
+            </h2>
+          </div>
+
+          <p className="mt-1 text-[11px] text-gray-500">
+            Voice Integrity & Impersonation Guard
+          </p>
+
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 p-5 lg:grid-cols-2">
+
+          {/* DESCRIPTION */}
+
+          <div>
+
+            <div className="mb-4 flex items-center gap-3">
+
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-lg font-black text-cyan-400">
+                V
+              </div>
+
+              <div>
+                <h3 className="text-xl font-black tracking-wide text-white">
+                  VIGIL
+                </h3>
+
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-400">
+                  Voice Integrity & Impersonation Guard
+                </p>
+              </div>
+
+            </div>
+
+            <p className="max-w-xl text-sm leading-6 text-gray-300">
+              VIGIL is an AI-powered voice security
+              platform designed to detect potentially
+              synthetic voices, verify trusted speakers,
+              understand social-engineering intent and
+              provide explainable real-time risk
+              assessment.
+            </p>
+
+            <div className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+
+              <div className="text-[9px] font-bold uppercase tracking-[0.2em] text-cyan-400">
+                Mission
+              </div>
+
+              <div className="mt-2 text-sm font-bold text-white">
+                Detect. Verify. Understand. Protect.
+              </div>
+
+            </div>
+
+          </div>
+
+          {/* PROJECT INFO */}
+
+          <div className="grid grid-cols-2 gap-3">
+
+            <div className="rounded-xl border border-[#26334D] bg-[#192233] p-4">
+
+              <Target className="mb-3 h-4 w-4 text-red-400" />
+
+              <div className="text-[9px] uppercase tracking-wider text-gray-500">
+                Problem Statement
+              </div>
+
+              <div className="mt-1 text-sm font-black text-white">
+                SIH26104
+              </div>
+
+            </div>
+
+            <div className="rounded-xl border border-[#26334D] bg-[#192233] p-4">
+
+              <Users className="mb-3 h-4 w-4 text-blue-400" />
+
+              <div className="text-[9px] uppercase tracking-wider text-gray-500">
+                Team
+              </div>
+
+              <div className="mt-1 text-sm font-black text-white">
+                DATA MINDS
+              </div>
+
+            </div>
+
+            <div className="rounded-xl border border-[#26334D] bg-[#192233] p-4">
+
+              <Cpu className="mb-3 h-4 w-4 text-purple-400" />
+
+              <div className="text-[9px] uppercase tracking-wider text-gray-500">
+                Platform
+              </div>
+
+              <div className="mt-1 text-sm font-black text-white">
+                AI + Voice Security
+              </div>
+
+            </div>
+
+            <div className="rounded-xl border border-[#26334D] bg-[#192233] p-4">
+
+              <Globe className="mb-3 h-4 w-4 text-emerald-400" />
+
+              <div className="text-[9px] uppercase tracking-wider text-gray-500">
+                Event
+              </div>
+
+              <div className="mt-1 text-sm font-black text-white">
+                SIH 2026
+              </div>
+
+            </div>
+
+          </div>
+
+        </div>
+
+        {/* TECHNOLOGY PIPELINE */}
+
+        <div className="border-t border-[#26334D] p-5">
+
+          <div className="mb-3 text-[9px] font-bold uppercase tracking-[0.2em] text-gray-500">
+            VIGIL Detection Pipeline
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
+
+            {[
+              'Audio',
+              'Voice Detection',
+              'Speaker Verification',
+              'Speech-to-Text',
+              'Context Analysis',
+              'Risk Engine',
+              'Threat Protection',
+            ].map(
+              (item, index) => (
+                <React.Fragment key={item}>
+
+                  <span className="rounded-lg border border-[#26334D] bg-[#192233] px-3 py-2 text-gray-300">
+                    {item}
+                  </span>
+
+                  {index < 6 && (
+                    <span className="text-gray-600">
+                      →
+                    </span>
+                  )}
+
+                </React.Fragment>
+              )
+            )}
+
+          </div>
+
+        </div>
+
+      </section>
+
+      {/* =================================================
+          FOOTER
+      ================================================= */}
+
+      <div className="mt-6 flex flex-col items-center justify-between gap-2 border-t border-[#26334D] pt-5 text-center sm:flex-row sm:text-left">
+
+        <div className="text-[10px] text-gray-600">
+          VIGIL — Voice Integrity & Impersonation Guard
+        </div>
+
+        <div className="text-[10px] font-semibold text-gray-600">
+          DATA MINDS • SIH26104 • Smart India Hackathon 2026
+        </div>
+
+      </div>
+
     </div>
   );
-}
+};
