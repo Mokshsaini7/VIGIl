@@ -113,18 +113,22 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, onSwitchTo
           </button>
         </form>
 
-        {/* Footer Link to Signup */}
-        <div className="pt-4 border-t border-[#26334D] text-center text-xs text-gray-400">
-          Don't have an account?{' '}
-          <button
-            onClick={onSwitchToSignup}
-            className="text-blue-400 font-semibold hover:underline"
-          >
-            Create VIGIL Account
-          </button>
-        </div>
+       {/* Footer Link to Signup */}
+<div className="pt-4 border-t border-[#26334D] text-center text-xs text-gray-400">
+  Don't have an account?{' '}
+  <button
+    onClick={onSwitchToSignup}
+    className="text-blue-400 font-semibold hover:underline"
+  >
+    Create VIGIL Account
+  </button>
+</div>
 
-      </div>
-    </div>
-  );
-};
+{/* Team Credit */}
+<div className="mt-5 text-center text-xs text-gray-500">
+  Developed by{' '}
+  <span className="text-gray-300 font-medium">
+    Team DataMinds
+  </span>{' '}
+  with love <span className="text-red-500">♥</span>
+</div>
