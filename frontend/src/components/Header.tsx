@@ -8,7 +8,7 @@ import {
   Menu,
 } from 'lucide-react';
 
-import LogoView from './LogoView';
+import LogoView from '../app/components/LogoView.tsx';
 
 interface HeaderProps {
   title: string;
