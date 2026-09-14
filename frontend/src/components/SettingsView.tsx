@@ -5,35 +5,62 @@ import React, { useEffect, useState } from 'react';
 import {
   Settings,
   User,
+  ShieldCheck,
   Sliders,
   Database,
-  CheckCircle2,
   Lock,
-  RefreshCw,
-  AlertTriangle,
-  Save,
+  CheckCircle2,
+  LogOut,
+  Mail,
+  Shield,
+  Activity,
   Server,
+  Info,
+  Users,
+  Target,
+  Cpu,
+  Globe,
+  KeyRound,
+  RefreshCw,
+  AlertCircle,
 } from 'lucide-react';
 
+/* =========================================================
+   TYPES
+   ========================================================= */
+
+interface SettingsUser {
+  id?: number | string;
+  username: string;
+  email?: string;
+  role: string;
+  is_active?: boolean;
+  token: string;
+}
+
 interface SettingsViewProps {
-  user: {
-    username: string;
-    role: string;
-    token: string;
-  } | null;
+  user: SettingsUser | null;
+  onLogout?: () => void;
 }
 
-interface UserSettings {
-  synthetic_threshold: number;
-  speaker_match_threshold: number;
-  urgency_weight: number;
-}
+/* =========================================================
+   API
+   ========================================================= */
 
-export const SettingsView: React.FC<SettingsViewProps> = ({
-  user,
-}) => {
-  const apiHost =
-    process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_HOST =
+  process.env.NEXT_PUBLIC_API_URL ||
+  'http://localhost:8000';
+
+/* =========================================================
+   COMPONENT
+   ========================================================= */
+
+export const SettingsView: React.FC<
+  SettingsViewProps
+> = ({ user, onLogout }) => {
+  /* =======================================================
+     RISK SETTINGS
+     ======================================================= */
 
   const [syntheticThreshold, setSyntheticThreshold] =
     useState(65);
@@ -41,748 +68,1263 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [mismatchThreshold, setMismatchThreshold] =
     useState(72);
 
-  const [urgencyWeight, setUrgencyWeight] = useState(15);
+  const [urgencyWeight, setUrgencyWeight] =
+    useState(15);
 
-  const [oldPassword, setOldPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-
-  const [savedSuccess, setSavedSuccess] = useState(false);
-  const [pwdSuccess, setPwdSuccess] = useState(false);
-
-  const [loadingSettings, setLoadingSettings] = useState(true);
-  const [savingSettings, setSavingSettings] = useState(false);
-  const [changingPassword, setChangingPassword] =
+  const [savedSuccess, setSavedSuccess] =
     useState(false);
 
-  const [error, setError] = useState('');
-  const [passwordError, setPasswordError] = useState('');
+  /* =======================================================
+     PASSWORD
+     ======================================================= */
 
-  const [backendStatus, setBackendStatus] = useState<
-    'checking' | 'online' | 'offline'
-  >('checking');
+  const [oldPassword, setOldPassword] =
+    useState('');
 
-  const [databaseStatus, setDatabaseStatus] = useState<
-    'checking' | 'connected' | 'offline'
-  >('checking');
+  const [newPassword, setNewPassword] =
+    useState('');
 
-  const getToken = () => {
-    if (user?.token) return user.token;
+  const [confirmPassword, setConfirmPassword] =
+    useState('');
 
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('vigil_token') || '';
-    }
+  const [pwdLoading, setPwdLoading] =
+    useState(false);
 
-    return '';
-  };
+  const [pwdSuccess, setPwdSuccess] =
+    useState(false);
 
-  const authHeaders = () => {
-    const token = getToken();
+  const [pwdError, setPwdError] =
+    useState('');
 
-    return {
-      'Content-Type': 'application/json',
-      ...(token
-        ? {
-            Authorization: `Bearer ${token}`,
-          }
-        : {}),
-    };
-  };
+  /* =======================================================
+     SYSTEM STATUS
+     ======================================================= */
 
-  /*
-   * ---------------------------------------------------------
-   * LOAD SETTINGS
-   * ---------------------------------------------------------
-   */
+  const [backendStatus, setBackendStatus] =
+    useState<'checking' | 'online' | 'offline'>(
+      'checking'
+    );
 
-  const loadSettings = async () => {
-    try {
-      setLoadingSettings(true);
-      setError('');
+  const [databaseStatus, setDatabaseStatus] =
+    useState<'checking' | 'online' | 'offline'>(
+      'checking'
+    );
 
-      const response = await fetch(
-        `${apiHost}/api/settings`,
-        {
-          method: 'GET',
-          headers: authHeaders(),
-          cache: 'no-store',
-        }
-      );
+  const [lastChecked, setLastChecked] =
+    useState('');
 
-      if (!response.ok) {
-        throw new Error(
-          `Settings request failed: ${response.status}`
-        );
-      }
+  /* =======================================================
+     CHECK SYSTEM STATUS
+     ======================================================= */
 
-      const data: UserSettings = await response.json();
-
-      setSyntheticThreshold(
-        Number(data.synthetic_threshold ?? 65)
-      );
-
-      setMismatchThreshold(
-        Number(data.speaker_match_threshold ?? 72)
-      );
-
-      setUrgencyWeight(
-        Number(data.urgency_weight ?? 15)
-      );
-    } catch (err) {
-      console.error('Settings load error:', err);
-
-      /*
-       * Keep defaults if the endpoint is not available yet.
-       * This prevents the UI from breaking while backend
-       * settings support is being added.
-       */
-      setError(
-        'Could not load saved settings. Showing default configuration.'
-      );
-    } finally {
-      setLoadingSettings(false);
-    }
-  };
-
-  useEffect(() => {
-    loadSettings();
-  }, [user?.token]);
-
-  /*
-   * ---------------------------------------------------------
-   * SYSTEM HEALTH
-   * ---------------------------------------------------------
-   */
-
-  const checkSystemHealth = async () => {
+  const checkSystemStatus = async () => {
     setBackendStatus('checking');
     setDatabaseStatus('checking');
 
     try {
-      const response = await fetch(
-        `${apiHost}/health`,
-        {
-          method: 'GET',
-          cache: 'no-store',
-        }
+      const backendResponse =
+        await fetch(
+          `${API_HOST}/health`,
+          {
+            method: 'GET',
+            cache: 'no-store',
+          }
+        );
+
+      setBackendStatus(
+        backendResponse.ok
+          ? 'online'
+          : 'offline'
       );
-
-      if (!response.ok) {
-        throw new Error('Backend offline');
-      }
-
-      setBackendStatus('online');
     } catch {
       setBackendStatus('offline');
     }
 
     try {
-      const response = await fetch(
-        `${apiHost}/health/db`,
-        {
-          method: 'GET',
-          cache: 'no-store',
-        }
+      const databaseResponse =
+        await fetch(
+          `${API_HOST}/health/db`,
+          {
+            method: 'GET',
+            cache: 'no-store',
+          }
+        );
+
+      setDatabaseStatus(
+        databaseResponse.ok
+          ? 'online'
+          : 'offline'
       );
-
-      const data = await response.json();
-
-      if (
-        response.ok &&
-        data?.status === 'healthy'
-      ) {
-        setDatabaseStatus('connected');
-      } else {
-        setDatabaseStatus('offline');
-      }
     } catch {
       setDatabaseStatus('offline');
     }
+
+    setLastChecked(
+      new Date().toLocaleTimeString()
+    );
   };
 
   useEffect(() => {
-    checkSystemHealth();
-
-    const interval = setInterval(
-      checkSystemHealth,
-      30000
-    );
-
-    return () => clearInterval(interval);
+    checkSystemStatus();
   }, []);
 
-  /*
-   * ---------------------------------------------------------
-   * SAVE SETTINGS
-   * ---------------------------------------------------------
-   */
+  /* =======================================================
+     SAVE RISK CONFIGURATION
+     ======================================================= */
 
-  const handleSaveSettings = async (
-    e: React.FormEvent
+  const handleSaveSettings = (
+    event: React.FormEvent
   ) => {
-    e.preventDefault();
+    event.preventDefault();
+
+    /*
+     * These settings are currently maintained locally
+     * because the backend settings endpoint has not yet
+     * been added.
+     */
 
     try {
-      setSavingSettings(true);
-      setError('');
-      setSavedSuccess(false);
-
-      const response = await fetch(
-        `${apiHost}/api/settings`,
-        {
-          method: 'PUT',
-          headers: authHeaders(),
-          body: JSON.stringify({
-            synthetic_threshold: syntheticThreshold,
-            speaker_match_threshold: mismatchThreshold,
-            urgency_weight: urgencyWeight,
-          }),
-        }
+      localStorage.setItem(
+        'vigil_risk_settings',
+        JSON.stringify({
+          syntheticThreshold,
+          mismatchThreshold,
+          urgencyWeight,
+        })
       );
+    } catch {
+      // Ignore local storage failures.
+    }
 
-      if (!response.ok) {
-        const data = await response
-          .json()
-          .catch(() => null);
+    setSavedSuccess(true);
 
-        throw new Error(
-          data?.detail ||
-            `Failed to save settings (${response.status})`
+    window.setTimeout(() => {
+      setSavedSuccess(false);
+    }, 3000);
+  };
+
+  /* =======================================================
+     RESTORE RISK SETTINGS
+     ======================================================= */
+
+  useEffect(() => {
+    try {
+      const saved =
+        localStorage.getItem(
+          'vigil_risk_settings'
+        );
+
+      if (!saved) return;
+
+      const parsed =
+        JSON.parse(saved);
+
+      if (
+        typeof parsed.syntheticThreshold ===
+        'number'
+      ) {
+        setSyntheticThreshold(
+          parsed.syntheticThreshold
         );
       }
 
-      setSavedSuccess(true);
+      if (
+        typeof parsed.mismatchThreshold ===
+        'number'
+      ) {
+        setMismatchThreshold(
+          parsed.mismatchThreshold
+        );
+      }
 
-      setTimeout(() => {
-        setSavedSuccess(false);
-      }, 3000);
-    } catch (err) {
-      console.error('Settings save error:', err);
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'Unable to save configuration settings.'
-      );
-    } finally {
-      setSavingSettings(false);
+      if (
+        typeof parsed.urgencyWeight ===
+        'number'
+      ) {
+        setUrgencyWeight(
+          parsed.urgencyWeight
+        );
+      }
+    } catch {
+      // Ignore invalid saved settings.
     }
-  };
+  }, []);
 
-  /*
-   * ---------------------------------------------------------
-   * CHANGE PASSWORD
-   * ---------------------------------------------------------
-   */
+  /* =======================================================
+     PASSWORD CHANGE
+     ======================================================= */
 
   const handlePasswordChange = async (
-    e: React.FormEvent
+    event: React.FormEvent
   ) => {
-    e.preventDefault();
+    event.preventDefault();
 
-    setPasswordError('');
+    setPwdError('');
     setPwdSuccess(false);
 
     if (!oldPassword || !newPassword) {
-      setPasswordError(
-        'Both current and new passwords are required.'
+      setPwdError(
+        'Please enter your current and new password.'
       );
       return;
     }
 
-    if (newPassword.length < 8) {
-      setPasswordError(
-        'New password must contain at least 8 characters.'
+    if (newPassword.length < 6) {
+      setPwdError(
+        'New password must contain at least 6 characters.'
       );
       return;
     }
+
+    if (newPassword !== confirmPassword) {
+      setPwdError(
+        'New password and confirmation do not match.'
+      );
+      return;
+    }
+
+    if (!user?.token) {
+      setPwdError(
+        'Your session is not available. Please login again.'
+      );
+      return;
+    }
+
+    setPwdLoading(true);
 
     try {
-      setChangingPassword(true);
+      const response =
+        await fetch(
+          `${API_HOST}/api/auth/change-password`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type':
+                'application/json',
 
-      const response = await fetch(
-        `${apiHost}/api/auth/change-password`,
-        {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({
-            current_password: oldPassword,
-            new_password: newPassword,
-          }),
-        }
-      );
+              Authorization:
+                `Bearer ${user.token}`,
+            },
+            body: JSON.stringify({
+              current_password:
+                oldPassword,
 
-      const data = await response
-        .json()
-        .catch(() => null);
+              new_password:
+                newPassword,
+            }),
+          }
+        );
+
+      const data =
+        await response
+          .json()
+          .catch(() => null);
 
       if (!response.ok) {
-        throw new Error(
+        setPwdError(
           data?.detail ||
             'Unable to change password.'
         );
+
+        return;
       }
 
       setPwdSuccess(true);
 
       setOldPassword('');
       setNewPassword('');
+      setConfirmPassword('');
 
-      setTimeout(() => {
+      window.setTimeout(() => {
         setPwdSuccess(false);
-      }, 3000);
-    } catch (err) {
-      console.error(
-        'Password change error:',
-        err
-      );
-
-      setPasswordError(
-        err instanceof Error
-          ? err.message
-          : 'Unable to change password.'
+      }, 4000);
+    } catch {
+      setPwdError(
+        'Unable to connect to the VIGIL backend.'
       );
     } finally {
-      setChangingPassword(false);
+      setPwdLoading(false);
     }
   };
 
-  /*
-   * ---------------------------------------------------------
-   * STATUS HELPERS
-   * ---------------------------------------------------------
-   */
+  /* =======================================================
+     USER DISPLAY DATA
+     ======================================================= */
 
-  const getStatusClass = (
+  const username =
+    user?.username || 'Authenticated User';
+
+  const email =
+    user?.email || 'Email not available';
+
+  const role =
+    user?.role || 'ANALYST';
+
+  const accountActive =
+    user?.is_active ?? true;
+
+  const initials =
+    username
+      .split(' ')
+      .filter(Boolean)
+      .map(
+        (part) =>
+          part.charAt(0).toUpperCase()
+      )
+      .slice(0, 2)
+      .join('') || 'VU';
+
+  /* =======================================================
+     STATUS COMPONENT
+     ======================================================= */
+
+  const StatusBadge = ({
+    status,
+  }: {
     status:
       | 'checking'
       | 'online'
-      | 'offline'
-      | 'connected'
-  ) => {
-    if (status === 'online' || status === 'connected') {
-      return 'text-emerald-400';
+      | 'offline';
+  }) => {
+    if (status === 'checking') {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold text-amber-400">
+          <RefreshCw className="h-3 w-3 animate-spin" />
+          CHECKING
+        </span>
+      );
     }
 
-    if (status === 'offline') {
-      return 'text-red-400';
+    if (status === 'online') {
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-400">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+          ONLINE
+        </span>
+      );
     }
 
-    return 'text-amber-400';
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-[10px] font-semibold text-red-400">
+        <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
+        OFFLINE
+      </span>
+    );
   };
 
-  const getStatusText = (
-    status:
-      | 'checking'
-      | 'online'
-      | 'offline'
-      | 'connected'
-  ) => {
-    if (status === 'online') return 'ONLINE';
-    if (status === 'connected') return 'CONNECTED';
-    if (status === 'offline') return 'OFFLINE';
-
-    return 'CHECKING...';
-  };
+  /* =======================================================
+     RENDER
+     ======================================================= */
 
   return (
-    <div className="p-4 sm:p-6 space-y-6 w-full min-w-0">
-      {/* Header */}
-      <div className="border-b border-[#26334D] pb-4">
-        <h1 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
-          <Settings className="w-5 h-5 text-blue-400" />
+    <div className="w-full min-w-0 p-4 sm:p-6">
 
-          <span>
-            System Settings & Security Controls
-          </span>
-        </h1>
+      {/* =================================================
+          PAGE HEADER
+      ================================================= */}
 
-        <p className="text-xs text-gray-400 mt-1">
-          Configure security thresholds, account security,
-          and VIGIL infrastructure diagnostics.
-        </p>
-      </div>
+      <div className="mb-6 border-b border-[#26334D] pb-5">
 
-      {/* Error */}
-      {error && (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-400 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 shrink-0" />
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 
-          <span>{error}</span>
-        </div>
-      )}
+          <div>
+            <div className="mb-2 flex items-center gap-2">
+              <div className="rounded-lg bg-blue-500/10 p-2">
+                <Settings className="h-5 w-5 text-blue-400" />
+              </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-        {/* User Account */}
-        <div className="bg-[#121824] border border-[#26334D] rounded-xl p-5 space-y-4">
-          <h3 className="text-sm font-semibold text-white flex items-center space-x-2 border-b border-[#26334D] pb-3">
-            <User className="w-4 h-4 text-blue-400" />
-
-            <span>Active User Profile</span>
-          </h3>
-
-          <div className="bg-[#192233] p-4 rounded-xl border border-[#26334D] space-y-3 text-xs">
-            <div className="flex justify-between items-center gap-4">
-              <span className="text-gray-400">
-                Username:
-              </span>
-
-              <span className="font-bold text-white font-mono truncate">
-                {user?.username || 'Authenticated User'}
-              </span>
+              <h1 className="text-xl font-bold text-white sm:text-2xl">
+                System Settings
+              </h1>
             </div>
 
-            <div className="flex justify-between items-center">
-              <span className="text-gray-400">
-                Security Role:
-              </span>
+            <p className="max-w-2xl text-xs leading-5 text-gray-400 sm:text-sm">
+              Manage your VIGIL account, security
+              configuration, authentication and
+              system preferences.
+            </p>
+          </div>
 
-              <span className="px-2.5 py-0.5 text-[10px] font-bold rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 font-mono">
-                {user?.role || 'ANALYST'}
-              </span>
-            </div>
+          <div className="flex items-center gap-2 rounded-xl border border-[#26334D] bg-[#121824] px-3 py-2">
+            <Activity className="h-4 w-4 text-emerald-400" />
 
-            <div className="flex justify-between items-center">
-              <span className="text-gray-400">
-                Authentication:
-              </span>
+            <div>
+              <div className="text-[9px] uppercase tracking-wider text-gray-500">
+                Session
+              </div>
 
-              <span className="text-emerald-400 font-mono text-[10px]">
-                JWT ACTIVE
-              </span>
+              <div className="text-xs font-semibold text-emerald-400">
+                ACTIVE
+              </div>
             </div>
           </div>
 
-          {/* Password */}
-          <form
-            onSubmit={handlePasswordChange}
-            className="space-y-3 pt-2 text-xs"
-          >
-            <h4 className="font-semibold text-gray-300 flex items-center space-x-1.5">
-              <Lock className="w-3.5 h-3.5 text-gray-400" />
+        </div>
+      </div>
 
-              <span>Update Password</span>
-            </h4>
+      {/* =================================================
+          PROFILE + SECURITY
+      ================================================= */}
+
+      <div className="grid w-full grid-cols-1 gap-5 xl:grid-cols-2">
+
+        {/* =================================================
+            MY PROFILE
+        ================================================= */}
+
+        <section className="rounded-2xl border border-[#26334D] bg-[#121824] p-5 shadow-xl">
+
+          <div className="mb-5 flex items-center justify-between border-b border-[#26334D] pb-4">
+
+            <div className="flex items-center gap-2">
+              <User className="h-4 w-4 text-blue-400" />
+
+              <h2 className="text-sm font-bold text-white">
+                My Profile
+              </h2>
+            </div>
+
+            <span className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[9px] font-bold text-emerald-400">
+              VERIFIED SESSION
+            </span>
+
+          </div>
+
+          {/* PROFILE HERO */}
+
+          <div className="mb-5 flex items-center gap-4 rounded-xl border border-[#26334D] bg-[#192233] p-4">
+
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-blue-400/30 bg-blue-500/10 text-xl font-black text-blue-400">
+              {initials}
+            </div>
+
+            <div className="min-w-0">
+              <h3 className="truncate text-lg font-bold text-white">
+                {username}
+              </h3>
+
+              <div className="mt-1 flex items-center gap-2 text-xs text-gray-400">
+                <Mail className="h-3.5 w-3.5" />
+                <span className="truncate">
+                  {email}
+                </span>
+              </div>
+
+              <div className="mt-2 flex flex-wrap gap-2">
+
+                <span className="rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[9px] font-bold text-blue-400">
+                  {role}
+                </span>
+
+                {accountActive ? (
+                  <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[9px] font-bold text-emerald-400">
+                    ACCOUNT ACTIVE
+                  </span>
+                ) : (
+                  <span className="rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-[9px] font-bold text-red-400">
+                    ACCOUNT INACTIVE
+                  </span>
+                )}
+
+              </div>
+            </div>
+          </div>
+
+          {/* ACCOUNT DETAILS */}
+
+          <div className="space-y-2">
+
+            <div className="flex items-center justify-between rounded-lg border border-[#26334D] bg-[#192233] px-3 py-3">
+              <div className="flex items-center gap-2">
+                <User className="h-3.5 w-3.5 text-gray-500" />
+                <span className="text-xs text-gray-400">
+                  Username
+                </span>
+              </div>
+
+              <span className="max-w-[55%] truncate text-xs font-semibold text-white">
+                {username}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-[#26334D] bg-[#192233] px-3 py-3">
+              <div className="flex items-center gap-2">
+                <Mail className="h-3.5 w-3.5 text-gray-500" />
+                <span className="text-xs text-gray-400">
+                  Email
+                </span>
+              </div>
+
+              <span className="max-w-[55%] truncate text-xs font-semibold text-white">
+                {email}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-[#26334D] bg-[#192233] px-3 py-3">
+              <div className="flex items-center gap-2">
+                <Shield className="h-3.5 w-3.5 text-gray-500" />
+                <span className="text-xs text-gray-400">
+                  Security Role
+                </span>
+              </div>
+
+              <span className="rounded-md bg-blue-500/10 px-2 py-1 text-[10px] font-bold text-blue-400">
+                {role}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-[#26334D] bg-[#192233] px-3 py-3">
+              <div className="flex items-center gap-2">
+                <KeyRound className="h-3.5 w-3.5 text-gray-500" />
+                <span className="text-xs text-gray-400">
+                  Authentication
+                </span>
+              </div>
+
+              <span className="text-xs font-semibold text-emerald-400">
+                JWT ACTIVE
+              </span>
+            </div>
+
+          </div>
+
+          {/* LOGOUT */}
+
+          {onLogout && (
+            <button
+              type="button"
+              onClick={onLogout}
+              className="
+                mt-5
+                flex
+                w-full
+                items-center
+                justify-center
+                gap-2
+                rounded-xl
+                border
+                border-red-500/30
+                bg-red-500/10
+                px-4
+                py-3
+                text-xs
+                font-bold
+                text-red-400
+                transition
+                hover:border-red-500/50
+                hover:bg-red-500/20
+                hover:text-red-300
+              "
+            >
+              <LogOut className="h-4 w-4" />
+              LOG OUT OF VIGIL
+            </button>
+          )}
+
+        </section>
+
+        {/* =================================================
+            PASSWORD SECURITY
+        ================================================= */}
+
+        <section className="rounded-2xl border border-[#26334D] bg-[#121824] p-5 shadow-xl">
+
+          <div className="mb-5 border-b border-[#26334D] pb-4">
+
+            <div className="flex items-center gap-2">
+              <Lock className="h-4 w-4 text-purple-400" />
+
+              <h2 className="text-sm font-bold text-white">
+                Account Security
+              </h2>
+            </div>
+
+            <p className="mt-1 text-[11px] text-gray-500">
+              Update your VIGIL account password.
+            </p>
+
+          </div>
+
+          <form
+            onSubmit={
+              handlePasswordChange
+            }
+            className="space-y-4"
+          >
 
             <div>
-              <label className="block text-gray-400 mb-1">
+              <label className="mb-1.5 block text-[11px] font-medium text-gray-400">
                 Current Password
               </label>
 
               <input
                 type="password"
-                placeholder="Enter current password"
                 value={oldPassword}
-                onChange={(e) =>
-                  setOldPassword(e.target.value)
+                onChange={(event) =>
+                  setOldPassword(
+                    event.target.value
+                  )
                 }
-                className="w-full bg-[#192233] border border-[#26334D] rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                placeholder="Enter current password"
+                className="
+                  w-full
+                  rounded-xl
+                  border
+                  border-[#26334D]
+                  bg-[#192233]
+                  px-3
+                  py-3
+                  text-sm
+                  text-white
+                  outline-none
+                  transition
+                  placeholder:text-gray-600
+                  focus:border-blue-500
+                "
               />
             </div>
 
             <div>
-              <label className="block text-gray-400 mb-1">
+              <label className="mb-1.5 block text-[11px] font-medium text-gray-400">
                 New Password
               </label>
 
               <input
                 type="password"
-                placeholder="Minimum 8 characters"
                 value={newPassword}
-                onChange={(e) =>
-                  setNewPassword(e.target.value)
+                onChange={(event) =>
+                  setNewPassword(
+                    event.target.value
+                  )
                 }
-                className="w-full bg-[#192233] border border-[#26334D] rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                placeholder="Enter new password"
+                className="
+                  w-full
+                  rounded-xl
+                  border
+                  border-[#26334D]
+                  bg-[#192233]
+                  px-3
+                  py-3
+                  text-sm
+                  text-white
+                  outline-none
+                  transition
+                  placeholder:text-gray-600
+                  focus:border-blue-500
+                "
               />
             </div>
 
-            {passwordError && (
-              <div className="p-2.5 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-xs flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4" />
+            <div>
+              <label className="mb-1.5 block text-[11px] font-medium text-gray-400">
+                Confirm New Password
+              </label>
 
-                <span>{passwordError}</span>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(event) =>
+                  setConfirmPassword(
+                    event.target.value
+                  )
+                }
+                placeholder="Confirm new password"
+                className="
+                  w-full
+                  rounded-xl
+                  border
+                  border-[#26334D]
+                  bg-[#192233]
+                  px-3
+                  py-3
+                  text-sm
+                  text-white
+                  outline-none
+                  transition
+                  placeholder:text-gray-600
+                  focus:border-blue-500
+                "
+              />
+            </div>
+
+            {pwdError && (
+              <div className="flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{pwdError}</span>
+              </div>
+            )}
+
+            {pwdSuccess && (
+              <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-400">
+                <CheckCircle2 className="h-4 w-4" />
+                Password updated successfully.
               </div>
             )}
 
             <button
               type="submit"
-              disabled={changingPassword}
-              className="w-full bg-[#192233] hover:bg-[#26334D] disabled:opacity-50 text-gray-200 border border-[#26334D] font-semibold py-2 rounded-lg transition-colors text-xs flex items-center justify-center gap-2"
+              disabled={pwdLoading}
+              className="
+                flex
+                w-full
+                items-center
+                justify-center
+                gap-2
+                rounded-xl
+                bg-blue-600
+                px-4
+                py-3
+                text-xs
+                font-bold
+                text-white
+                shadow-lg
+                shadow-blue-600/20
+                transition
+                hover:bg-blue-500
+                disabled:cursor-not-allowed
+                disabled:opacity-50
+              "
             >
-              {changingPassword ? (
+              {pwdLoading ? (
                 <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  Updating...
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  UPDATING...
                 </>
               ) : (
                 <>
-                  <Lock className="w-3.5 h-3.5" />
-                  Update Password
+                  <Lock className="h-4 w-4" />
+                  UPDATE PASSWORD
                 </>
               )}
             </button>
 
-            {pwdSuccess && (
-              <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs flex items-center space-x-2">
-                <CheckCircle2 className="w-4 h-4" />
-
-                <span>
-                  Password updated successfully!
-                </span>
-              </div>
-            )}
           </form>
-        </div>
+        </section>
 
-        {/* Risk Controls */}
-        <div className="bg-[#121824] border border-[#26334D] rounded-xl p-5 space-y-4">
-          <h3 className="text-sm font-semibold text-white flex items-center space-x-2 border-b border-[#26334D] pb-3">
-            <Sliders className="w-4 h-4 text-emerald-400" />
-
-            <span>AI Risk Engine Thresholds</span>
-          </h3>
-
-          {loadingSettings ? (
-            <div className="flex items-center justify-center py-12 text-gray-500 text-xs">
-              <RefreshCw className="w-4 h-4 animate-spin mr-2" />
-
-              Loading saved configuration...
-            </div>
-          ) : (
-            <form
-              onSubmit={handleSaveSettings}
-              className="space-y-4 text-xs"
-            >
-              {/* Synthetic */}
-              <div>
-                <div className="flex justify-between mb-1.5 gap-3">
-                  <label className="text-gray-300 font-medium">
-                    Synthetic AI Voice Confidence Cutoff
-                  </label>
-
-                  <span className="font-bold text-blue-400 font-mono whitespace-nowrap">
-                    {syntheticThreshold}%
-                  </span>
-                </div>
-
-                <input
-                  type="range"
-                  min="50"
-                  max="90"
-                  value={syntheticThreshold}
-                  onChange={(e) =>
-                    setSyntheticThreshold(
-                      Number(e.target.value)
-                    )
-                  }
-                  className="w-full accent-blue-500 cursor-pointer"
-                />
-
-                <p className="text-[10px] text-gray-500 mt-1">
-                  Synthetic probability above this threshold
-                  triggers the configured synthetic-voice
-                  classification.
-                </p>
-              </div>
-
-              {/* Speaker */}
-              <div>
-                <div className="flex justify-between mb-1.5 gap-3">
-                  <label className="text-gray-300 font-medium">
-                    Speaker Biometric Cosine Match Cutoff
-                  </label>
-
-                  <span className="font-bold text-emerald-400 font-mono whitespace-nowrap">
-                    {mismatchThreshold}%
-                  </span>
-                </div>
-
-                <input
-                  type="range"
-                  min="50"
-                  max="90"
-                  value={mismatchThreshold}
-                  onChange={(e) =>
-                    setMismatchThreshold(
-                      Number(e.target.value)
-                    )
-                  }
-                  className="w-full accent-emerald-500 cursor-pointer"
-                />
-
-                <p className="text-[10px] text-gray-500 mt-1">
-                  Similarity below this threshold can flag a
-                  speaker identity mismatch.
-                </p>
-              </div>
-
-              {/* Urgency */}
-              <div>
-                <div className="flex justify-between mb-1.5 gap-3">
-                  <label className="text-gray-300 font-medium">
-                    Urgency & Secrecy Signal Weight
-                  </label>
-
-                  <span className="font-bold text-amber-400 font-mono whitespace-nowrap">
-                    {urgencyWeight} pts
-                  </span>
-                </div>
-
-                <input
-                  type="range"
-                  min="5"
-                  max="30"
-                  value={urgencyWeight}
-                  onChange={(e) =>
-                    setUrgencyWeight(
-                      Number(e.target.value)
-                    )
-                  }
-                  className="w-full accent-amber-500 cursor-pointer"
-                />
-
-                <p className="text-[10px] text-gray-500 mt-1">
-                  Weight applied to high-pressure urgency and
-                  secrecy signals.
-                </p>
-              </div>
-
-              <button
-                type="submit"
-                disabled={savingSettings}
-                className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg transition-colors shadow-lg shadow-blue-600/30 text-xs flex items-center justify-center gap-2"
-              >
-                {savingSettings ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-3.5 h-3.5" />
-
-                    Save Configuration Settings
-                  </>
-                )}
-              </button>
-
-              {savedSuccess && (
-                <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs flex items-center space-x-2">
-                  <CheckCircle2 className="w-4 h-4" />
-
-                  <span>
-                    Configuration parameters saved!
-                  </span>
-                </div>
-              )}
-            </form>
-          )}
-        </div>
-
-        {/* Infrastructure */}
-        <div className="lg:col-span-2 bg-[#121824] border border-[#26334D] rounded-xl p-5 space-y-3">
-          <div className="flex items-center justify-between border-b border-[#26334D] pb-3">
-            <h3 className="text-sm font-semibold text-white flex items-center space-x-2">
-              <Database className="w-4 h-4 text-purple-400" />
-
-              <span>
-                Infrastructure & Deployment Diagnostics
-              </span>
-            </h3>
-
-            <button
-              onClick={checkSystemHealth}
-              className="text-gray-400 hover:text-white"
-              title="Refresh health"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-            {/* Backend */}
-            <div className="bg-[#192233] p-3 rounded-lg border border-[#26334D]">
-              <span className="text-gray-400 block text-[10px] uppercase font-mono">
-                Backend API Target
-              </span>
-
-              <span className="text-white font-bold font-mono text-xs truncate block mt-1">
-                {apiHost}
-              </span>
-
-              <div className="flex items-center gap-1.5 mt-2">
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    backendStatus === 'online'
-                      ? 'bg-emerald-400'
-                      : backendStatus === 'offline'
-                      ? 'bg-red-400'
-                      : 'bg-amber-400'
-                  }`}
-                />
-
-                <span
-                  className={`font-mono text-[10px] ${getStatusClass(
-                    backendStatus
-                  )}`}
-                >
-                  {getStatusText(backendStatus)}
-                </span>
-              </div>
-            </div>
-
-            {/* WebSocket */}
-            <div className="bg-[#192233] p-3 rounded-lg border border-[#26334D]">
-              <span className="text-gray-400 block text-[10px] uppercase font-mono">
-                WebSocket Gateway
-              </span>
-
-              <span className="text-white font-bold font-mono text-xs block mt-1 truncate">
-                wss://vigil-backend-bbwj.onrender.com/ws
-              </span>
-
-              <div className="flex items-center gap-1.5 mt-2">
-                <Server className="w-3 h-3 text-blue-400" />
-
-                <span className="text-blue-400 font-mono text-[10px]">
-                  LIVE GATEWAY
-                </span>
-              </div>
-            </div>
-
-            {/* Database */}
-            <div className="bg-[#192233] p-3 rounded-lg border border-[#26334D]">
-              <span className="text-gray-400 block text-[10px] uppercase font-mono">
-                Database Layer
-              </span>
-
-              <span className="text-white font-bold font-mono text-xs block mt-1">
-                PostgreSQL / SQLAlchemy
-              </span>
-
-              <div className="flex items-center gap-1.5 mt-2">
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    databaseStatus === 'connected'
-                      ? 'bg-emerald-400'
-                      : databaseStatus === 'offline'
-                      ? 'bg-red-400'
-                      : 'bg-amber-400'
-                  }`}
-                />
-
-                <span
-                  className={`font-mono text-[10px] ${getStatusClass(
-                    databaseStatus
-                  )}`}
-                >
-                  {getStatusText(databaseStatus)}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
+
+      {/* =================================================
+          RISK ENGINE
+      ================================================= */}
+
+      <section className="mt-5 rounded-2xl border border-[#26334D] bg-[#121824] p-5 shadow-xl">
+
+        <div className="mb-5 flex flex-col gap-2 border-b border-[#26334D] pb-4 sm:flex-row sm:items-center sm:justify-between">
+
+          <div>
+            <div className="flex items-center gap-2">
+              <Sliders className="h-4 w-4 text-emerald-400" />
+
+              <h2 className="text-sm font-bold text-white">
+                AI Risk Engine Configuration
+              </h2>
+            </div>
+
+            <p className="mt-1 text-[11px] text-gray-500">
+              Configure local VIGIL risk-analysis thresholds.
+            </p>
+          </div>
+
+          <span className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 text-[9px] font-bold text-emerald-400">
+            RISK ENGINE
+          </span>
+
+        </div>
+
+        <form
+          onSubmit={
+            handleSaveSettings
+          }
+          className="space-y-6"
+        >
+
+          {/* SYNTHETIC */}
+
+          <div>
+            <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+
+              <label className="text-xs font-semibold text-gray-300">
+                Synthetic AI Voice Confidence Cutoff
+              </label>
+
+              <span className="font-mono text-sm font-bold text-blue-400">
+                {syntheticThreshold}%
+              </span>
+
+            </div>
+
+            <input
+              type="range"
+              min="50"
+              max="90"
+              value={
+                syntheticThreshold
+              }
+              onChange={(event) =>
+                setSyntheticThreshold(
+                  Number(
+                    event.target.value
+                  )
+                )
+              }
+              className="w-full cursor-pointer accent-blue-500"
+            />
+
+            <p className="mt-1 text-[10px] leading-4 text-gray-500">
+              Probability above this threshold
+              is treated as suspicious synthetic
+              voice evidence.
+            </p>
+          </div>
+
+          {/* SPEAKER */}
+
+          <div>
+            <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+
+              <label className="text-xs font-semibold text-gray-300">
+                Speaker Similarity Match Cutoff
+              </label>
+
+              <span className="font-mono text-sm font-bold text-emerald-400">
+                {mismatchThreshold}%
+              </span>
+
+            </div>
+
+            <input
+              type="range"
+              min="50"
+              max="90"
+              value={
+                mismatchThreshold
+              }
+              onChange={(event) =>
+                setMismatchThreshold(
+                  Number(
+                    event.target.value
+                  )
+                )
+              }
+              className="w-full cursor-pointer accent-emerald-500"
+            />
+
+            <p className="mt-1 text-[10px] leading-4 text-gray-500">
+              Similarity below this level can
+              indicate a speaker mismatch when
+              a trusted profile is enrolled.
+            </p>
+          </div>
+
+          {/* URGENCY */}
+
+          <div>
+            <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+
+              <label className="text-xs font-semibold text-gray-300">
+                Urgency & Secrecy Signal Weight
+              </label>
+
+              <span className="font-mono text-sm font-bold text-amber-400">
+                {urgencyWeight} pts
+              </span>
+
+            </div>
+
+            <input
+              type="range"
+              min="5"
+              max="30"
+              value={
+                urgencyWeight
+              }
+              onChange={(event) =>
+                setUrgencyWeight(
+                  Number(
+                    event.target.value
+                  )
+                )
+              }
+              className="w-full cursor-pointer accent-amber-500"
+            />
+
+            <p className="mt-1 text-[10px] leading-4 text-gray-500">
+              Weight applied to high-pressure
+              conversation signals.
+            </p>
+          </div>
+
+          <button
+            type="submit"
+            className="
+              flex
+              w-full
+              items-center
+              justify-center
+              gap-2
+              rounded-xl
+              bg-blue-600
+              px-4
+              py-3
+              text-xs
+              font-bold
+              text-white
+              shadow-lg
+              shadow-blue-600/20
+              transition
+              hover:bg-blue-500
+            "
+          >
+            <CheckCircle2 className="h-4 w-4" />
+            SAVE CONFIGURATION
+          </button>
+
+          {savedSuccess && (
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-400">
+              <CheckCircle2 className="h-4 w-4" />
+              Configuration saved locally.
+            </div>
+          )}
+
+        </form>
+      </section>
+
+      {/* =================================================
+          SYSTEM STATUS
+      ================================================= */}
+
+      <section className="mt-5 rounded-2xl border border-[#26334D] bg-[#121824] p-5 shadow-xl">
+
+        <div className="mb-5 flex flex-col gap-3 border-b border-[#26334D] pb-4 sm:flex-row sm:items-center sm:justify-between">
+
+          <div>
+            <div className="flex items-center gap-2">
+              <Database className="h-4 w-4 text-purple-400" />
+
+              <h2 className="text-sm font-bold text-white">
+                System Status
+              </h2>
+            </div>
+
+            <p className="mt-1 text-[11px] text-gray-500">
+              Live connectivity diagnostics for VIGIL infrastructure.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={checkSystemStatus}
+            className="
+              flex
+              items-center
+              justify-center
+              gap-2
+              rounded-lg
+              border
+              border-[#26334D]
+              bg-[#192233]
+              px-3
+              py-2
+              text-[10px]
+              font-bold
+              text-gray-300
+              transition
+              hover:bg-[#26334D]
+            "
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            REFRESH
+          </button>
+
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+
+          {/* BACKEND */}
+
+          <div className="rounded-xl border border-[#26334D] bg-[#192233] p-4">
+
+            <div className="mb-3 flex items-center justify-between">
+
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/10">
+                <Server className="h-4 w-4 text-blue-400" />
+              </div>
+
+              <StatusBadge
+                status={
+                  backendStatus
+                }
+              />
+
+            </div>
+
+            <div className="text-[9px] uppercase tracking-wider text-gray-500">
+              Backend API
+            </div>
+
+            <div className="mt-1 truncate text-xs font-bold text-white">
+              {API_HOST}
+            </div>
+
+          </div>
+
+          {/* DATABASE */}
+
+          <div className="rounded-xl border border-[#26334D] bg-[#192233] p-4">
+
+            <div className="mb-3 flex items-center justify-between">
+
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-purple-500/10">
+                <Database className="h-4 w-4 text-purple-400" />
+              </div>
+
+              <StatusBadge
+                status={
+                  databaseStatus
+                }
+              />
+
+            </div>
+
+            <div className="text-[9px] uppercase tracking-wider text-gray-500">
+              Database
+            </div>
+
+            <div className="mt-1 text-xs font-bold text-white">
+              PostgreSQL / SQLAlchemy
+            </div>
+
+          </div>
+
+          {/* AUTH */}
+
+          <div className="rounded-xl border border-[#26334D] bg-[#192233] p-4">
+
+            <div className="mb-3 flex items-center justify-between">
+
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10">
+                <ShieldCheck className="h-4 w-4 text-emerald-400" />
+              </div>
+
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                ACTIVE
+              </span>
+
+            </div>
+
+            <div className="text-[9px] uppercase tracking-wider text-gray-500">
+              Authentication
+            </div>
+
+            <div className="mt-1 text-xs font-bold text-white">
+              JWT Bearer Session
+            </div>
+
+          </div>
+
+        </div>
+
+        {lastChecked && (
+          <div className="mt-4 text-right text-[9px] text-gray-600">
+            Last checked: {lastChecked}
+          </div>
+        )}
+
+      </section>
+
+      {/* =================================================
+          ABOUT VIGIL
+      ================================================= */}
+
+      <section className="mt-5 overflow-hidden rounded-2xl border border-blue-500/20 bg-gradient-to-br from-[#121824] via-[#121824] to-blue-950/20 shadow-xl">
+
+        <div className="border-b border-[#26334D] p-5">
+
+          <div className="flex items-center gap-2">
+            <Info className="h-4 w-4 text-cyan-400" />
+
+            <h2 className="text-sm font-bold text-white">
+              About VIGIL
+            </h2>
+          </div>
+
+          <p className="mt-1 text-[11px] text-gray-500">
+            Voice Integrity & Impersonation Guard
+          </p>
+
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 p-5 lg:grid-cols-2">
+
+          {/* DESCRIPTION */}
+
+          <div>
+
+            <div className="mb-4 flex items-center gap-3">
+
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-lg font-black text-cyan-400">
+                V
+              </div>
+
+              <div>
+                <h3 className="text-xl font-black tracking-wide text-white">
+                  VIGIL
+                </h3>
+
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-400">
+                  Voice Integrity & Impersonation Guard
+                </p>
+              </div>
+
+            </div>
+
+            <p className="max-w-xl text-sm leading-6 text-gray-300">
+              VIGIL is an AI-powered voice security
+              platform designed to detect potentially
+              synthetic voices, verify trusted speakers,
+              understand social-engineering intent and
+              provide explainable real-time risk
+              assessment.
+            </p>
+
+            <div className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+
+              <div className="text-[9px] font-bold uppercase tracking-[0.2em] text-cyan-400">
+                Mission
+              </div>
+
+              <div className="mt-2 text-sm font-bold text-white">
+                Detect. Verify. Understand. Protect.
+              </div>
+
+            </div>
+
+          </div>
+
+          {/* PROJECT INFO */}
+
+          <div className="grid grid-cols-2 gap-3">
+
+            <div className="rounded-xl border border-[#26334D] bg-[#192233] p-4">
+
+              <Target className="mb-3 h-4 w-4 text-red-400" />
+
+              <div className="text-[9px] uppercase tracking-wider text-gray-500">
+                Problem Statement
+              </div>
+
+              <div className="mt-1 text-sm font-black text-white">
+                SIH26104
+              </div>
+
+            </div>
+
+            <div className="rounded-xl border border-[#26334D] bg-[#192233] p-4">
+
+              <Users className="mb-3 h-4 w-4 text-blue-400" />
+
+              <div className="text-[9px] uppercase tracking-wider text-gray-500">
+                Team
+              </div>
+
+              <div className="mt-1 text-sm font-black text-white">
+                DATA MINDS
+              </div>
+
+            </div>
+
+            <div className="rounded-xl border border-[#26334D] bg-[#192233] p-4">
+
+              <Cpu className="mb-3 h-4 w-4 text-purple-400" />
+
+              <div className="text-[9px] uppercase tracking-wider text-gray-500">
+                Platform
+              </div>
+
+              <div className="mt-1 text-sm font-black text-white">
+                AI + Voice Security
+              </div>
+
+            </div>
+
+            <div className="rounded-xl border border-[#26334D] bg-[#192233] p-4">
+
+              <Globe className="mb-3 h-4 w-4 text-emerald-400" />
+
+              <div className="text-[9px] uppercase tracking-wider text-gray-500">
+                Event
+              </div>
+
+              <div className="mt-1 text-sm font-black text-white">
+                SIH 2026
+              </div>
+
+            </div>
+
+          </div>
+
+        </div>
+
+        {/* TECHNOLOGY PIPELINE */}
+
+        <div className="border-t border-[#26334D] p-5">
+
+          <div className="mb-3 text-[9px] font-bold uppercase tracking-[0.2em] text-gray-500">
+            VIGIL Detection Pipeline
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
+
+            {[
+              'Audio',
+              'Voice Detection',
+              'Speaker Verification',
+              'Speech-to-Text',
+              'Context Analysis',
+              'Risk Engine',
+              'Threat Protection',
+            ].map(
+              (item, index) => (
+                <React.Fragment key={item}>
+
+                  <span className="rounded-lg border border-[#26334D] bg-[#192233] px-3 py-2 text-gray-300">
+                    {item}
+                  </span>
+
+                  {index < 6 && (
+                    <span className="text-gray-600">
+                      →
+                    </span>
+                  )}
+
+                </React.Fragment>
+              )
+            )}
+
+          </div>
+
+        </div>
+
+      </section>
+
+      {/* =================================================
+          FOOTER
+      ================================================= */}
+
+      <div className="mt-6 flex flex-col items-center justify-between gap-2 border-t border-[#26334D] pt-5 text-center sm:flex-row sm:text-left">
+
+        <div className="text-[10px] text-gray-600">
+          VIGIL — Voice Integrity & Impersonation Guard
+        </div>
+
+        <div className="text-[10px] font-semibold text-gray-600">
+          DATA MINDS • SIH26104 • Smart India Hackathon 2026
+        </div>
+
+      </div>
+
     </div>
   );
 };
