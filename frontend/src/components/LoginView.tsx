@@ -1,6 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, {
+  useState,
+} from 'react';
+
 import {
   ShieldAlert,
   Lock,
@@ -9,197 +12,325 @@ import {
   AlertCircle,
 } from 'lucide-react';
 
+import { API_URL } from '@/lib/api';
+
+
 interface LoginViewProps {
-  onLoginSuccess: (user: {
-    username: string;
-    role: string;
-    token: string;
-  }) => void;
+  onLoginSuccess: (
+    user: {
+      username: string;
+      role: string;
+      token: string;
+      account_status: string;
+    }
+  ) => void;
+
   onSwitchToSignup: () => void;
 }
 
-export const LoginView: React.FC<LoginViewProps> = ({
+
+export const LoginView: React.FC<
+  LoginViewProps
+> = ({
   onLoginSuccess,
   onSwitchToSignup,
 }) => {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const [
+    username,
+    setUsername,
+  ] = useState('');
+
+  const [
+    password,
+    setPassword,
+  ] = useState('');
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(false);
+
+  const [
+    error,
+    setError,
+  ] = useState<string | null>(
+    null
+  );
+
+
+  const handleSubmit = async (
+    e: React.FormEvent
+  ) => {
+
     e.preventDefault();
 
+
     if (!username || !password) {
-      setError('Please fill in all fields.');
+
+      setError(
+        'Enter your username and password.'
+      );
+
       return;
     }
+
 
     setLoading(true);
     setError(null);
 
+
     try {
-      const formData = new URLSearchParams();
-      formData.append('username', username);
-      formData.append('password', password);
+
+      const formData =
+        new URLSearchParams({
+          username,
+          password,
+        });
+
 
       const res = await fetch(
-        'https://vigil-backend-bbwj.onrender.com/api/auth/login',
+        `${API_URL}/api/auth/login`,
         {
           method: 'POST',
+
           headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Type':
+              'application/x-www-form-urlencoded',
           },
+
           body: formData.toString(),
         }
       );
 
-      if (res.ok) {
-        const data = await res.json();
 
-        localStorage.setItem('vigil_token', data.access_token);
-
-        localStorage.setItem(
-          'vigil_user',
-          JSON.stringify({
-            username: data.username,
-            role: data.role,
-          })
-        );
-
-        onLoginSuccess({
-          username: data.username,
-          role: data.role,
-          token: data.access_token,
-        });
-      } else {
-        const errData = await res
+      const data =
+        await res
           .json()
-          .catch(() => ({ detail: 'Authentication failed' }));
+          .catch(
+            () => ({})
+          );
+
+
+      if (!res.ok) {
+
+        const messages:
+          Record<string, string> = {
+
+          ACCOUNT_PENDING_APPROVAL:
+            'Your account is waiting for administrator approval.',
+
+          ACCOUNT_REJECTED:
+            'This account request was rejected.',
+
+          ACCOUNT_SUSPENDED:
+            'This account is currently suspended.',
+        };
+
 
         setError(
-          errData.detail || 'Invalid username or password.'
+          messages[data.detail]
+          ||
+          data.detail
+          ||
+          'Unable to sign in.'
         );
+
+
+        return;
       }
-    } catch (err) {
-      setError(
-        'Server connection error. Please ensure backend is running.'
+
+
+      localStorage.setItem(
+        'vigil_token',
+        data.access_token
       );
+
+
+      localStorage.setItem(
+        'vigil_user',
+        JSON.stringify({
+          username:
+            data.username,
+
+          role:
+            data.role,
+
+          account_status:
+            data.account_status,
+        })
+      );
+
+
+      onLoginSuccess({
+        username:
+          data.username,
+
+        role:
+          data.role,
+
+        token:
+          data.access_token,
+
+        account_status:
+          data.account_status,
+      });
+
+    } catch {
+
+      setError(
+        'VIGIL could not reach the security service. Check the backend URL.'
+      );
+
     } finally {
+
       setLoading(false);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-[#0B0F17] flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-[#121824] border border-[#26334D] rounded-2xl p-8 shadow-2xl space-y-6">
 
-        {/* VIGIL Header */}
-        <div className="text-center space-y-2">
-          <div className="inline-flex w-14 h-14 rounded-2xl bg-blue-600/20 border border-blue-500/40 items-center justify-center text-blue-400 mb-2 glow-blue">
-            <ShieldAlert className="w-8 h-8 text-blue-400" />
+  return (
+
+    <div className="min-h-screen bg-[#0B0F17] flex items-center justify-center p-4">
+
+      <div className="w-full max-w-md bg-[#101722] border border-[#26334D] rounded-2xl p-8 shadow-2xl">
+
+        <div className="mb-7">
+
+          <div className="inline-flex w-11 h-11 rounded-xl bg-cyan-400/10 border border-cyan-400/20 items-center justify-center mb-4">
+
+            <ShieldAlert className="w-6 h-6 text-cyan-300" />
+
           </div>
 
-          <h1 className="text-2xl font-bold text-white tracking-wide">
-            VIGIL
+
+          <h1 className="text-2xl font-semibold text-white tracking-tight">
+
+            Sign in to VIGIL
+
           </h1>
 
-          <p className="text-xs text-blue-400 uppercase tracking-widest font-mono">
-            Voice Security Operations Center
+
+          <p className="mt-2 text-sm text-slate-400">
+
+            Voice security workspace for authorized users.
+
           </p>
+
         </div>
 
-        {/* Error Alert */}
+
         {error && (
-          <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-xs flex items-center space-x-2">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            <span>{error}</span>
+
+          <div className="mb-5 p-3 rounded-xl border border-red-500/20 bg-red-500/5 text-red-300 text-sm flex gap-2">
+
+            <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+
+            <span>
+              {error}
+            </span>
+
           </div>
+
         )}
 
-        {/* Login Form */}
-        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
 
-          {/* Username */}
-          <div>
-            <label className="block text-gray-400 mb-1.5 font-medium">
-              Username
-            </label>
+        <form
+          onSubmit={handleSubmit}
+          className="space-y-4"
+        >
 
-            <div className="relative">
-              <User className="w-4 h-4 text-gray-500 absolute left-3 top-3" />
+          <label className="block text-sm text-slate-300">
+
+            Username
+
+            <div className="relative mt-2">
+
+              <User className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
 
               <input
-                type="text"
-                placeholder="Enter your username"
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="w-full bg-[#192233] border border-[#26334D] rounded-xl pl-9 pr-3 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                onChange={(e) =>
+                  setUsername(
+                    e.target.value
+                  )
+                }
+                autoComplete="username"
+                className="w-full bg-[#151E2B] border border-[#26334D] rounded-xl pl-9 pr-3 py-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400/60"
+                placeholder="your username"
               />
+
             </div>
-          </div>
 
-          {/* Password */}
-          <div>
-            <label className="block text-gray-400 mb-1.5 font-medium">
-              Password
-            </label>
+          </label>
 
-            <div className="relative">
-              <Lock className="w-4 h-4 text-gray-500 absolute left-3 top-3" />
+
+          <label className="block text-sm text-slate-300">
+
+            Password
+
+            <div className="relative mt-2">
+
+              <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
 
               <input
                 type="password"
-                placeholder="Enter your password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-[#192233] border border-[#26334D] rounded-xl pl-9 pr-3 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                onChange={(e) =>
+                  setPassword(
+                    e.target.value
+                  )
+                }
+                autoComplete="current-password"
+                className="w-full bg-[#151E2B] border border-[#26334D] rounded-xl pl-9 pr-3 py-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-cyan-400/60"
+                placeholder="your password"
               />
+
             </div>
-          </div>
 
-          {/* Login Button */}
+          </label>
+
+
           <button
-            type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-xl transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center space-x-2 disabled:opacity-50 text-sm"
+            className="w-full bg-cyan-500 hover:bg-cyan-400 text-[#071016] font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            <span>
-              {loading ? 'Authenticating...' : 'Sign In to VIGIL'}
-            </span>
 
-            {!loading && <ArrowRight className="w-4 h-4" />}
+            {loading
+              ? 'Signing in…'
+              : 'Sign in'
+            }
+
+            {!loading && (
+              <ArrowRight className="w-4 h-4" />
+            )}
+
           </button>
+
         </form>
 
-        {/* Footer Link to Signup */}
-        <div className="pt-4 border-t border-[#26334D] text-center text-xs text-gray-400">
-          Don't have an account?{' '}
+
+        <div className="mt-7 pt-5 border-t border-[#26334D] text-sm text-slate-500 text-center">
+
+          Need access?
+
+          {' '}
 
           <button
-            type="button"
-            onClick={onSwitchToSignup}
-            className="text-blue-400 font-semibold hover:underline"
+            onClick={
+              onSwitchToSignup
+            }
+            className="text-cyan-300 hover:text-cyan-200"
           >
-            Create VIGIL Account
+
+            Request an account
+
           </button>
-        </div>
 
-        {/* Team Credit */}
-        <div className="text-center text-xs text-gray-500 -mt-2">
-          Developed by{' '}
-
-          <span className="text-gray-300 font-medium">
-            Team DataMinds
-          </span>{' '}
-
-          with love{' '}
-          <span className="text-red-500 text-sm">♥</span>
         </div>
 
       </div>
+
     </div>
   );
 };
-
-export default LoginView;
