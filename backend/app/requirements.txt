@@ -1,0 +1,57 @@
+# ============================================================
+# VIGIL — Backend Requirements
+# ============================================================
+
+# ----------------------------
+# FastAPI / Web Server
+# ----------------------------
+fastapi
+uvicorn[standard]
+
+# ----------------------------
+# Database
+# ----------------------------
+SQLAlchemy
+psycopg[binary]
+
+# ----------------------------
+# Environment Configuration
+# ----------------------------
+python-dotenv
+
+# ----------------------------
+# Request Forms / File Uploads
+# ----------------------------
+python-multipart
+
+# ----------------------------
+# Validation
+# ----------------------------
+pydantic
+pydantic[email]
+
+# ----------------------------
+# Authentication / Security
+# ----------------------------
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt
+
+# ----------------------------
+# HTTP / Networking
+# ----------------------------
+requests
+httpx
+
+# ----------------------------
+# Numerical / Audio Processing
+# ----------------------------
+numpy
+scipy
+librosa
+soundfile
+
+# ----------------------------
+# AI / Speech Processing
+# ----------------------------
+faster-whisper
