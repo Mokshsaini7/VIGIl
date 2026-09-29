@@ -1,12 +1,5 @@
 """
-VIGIL — FastAPI Main Application Entrypoint
-
-Integrates:
-- REST endpoints
-- WebSockets
-- CORS
-- Database initialization
-- Phase 1 security migration
+VIGIL — FastAPI Main Application
 """
 
 import sys
@@ -36,6 +29,7 @@ for path in (
 ):
 
     if path not in sys.path:
+
         sys.path.insert(
             0,
             path,
@@ -48,14 +42,13 @@ for path in (
 
 from fastapi import FastAPI
 
-from fastapi.middleware.cors import (
-    CORSMiddleware,
-)
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.database import (
     engine,
     Base,
     migrate_security_schema,
+    check_database_connection,
 )
 
 from app.api.endpoints import (
@@ -71,10 +64,48 @@ from app.api.websocket import (
 # DATABASE INITIALIZATION
 # ============================================================
 
-migrate_security_schema()
+print("[VIGIL] Initializing database...")
+
+
+if not check_database_connection():
+
+    print(
+        "[VIGIL] WARNING: Database connection "
+        "could not be verified."
+    )
+
+else:
+
+    print(
+        "[VIGIL] Database connection OK."
+    )
+
+
+try:
+
+    migrate_security_schema()
+
+    print(
+        "[VIGIL] Security schema migration checked."
+    )
+
+except Exception as exc:
+
+    print(
+        "[VIGIL] SECURITY SCHEMA MIGRATION ERROR:",
+        str(exc),
+    )
+
+    raise
+
 
 Base.metadata.create_all(
     bind=engine
+)
+
+
+print(
+    "[VIGIL] Database tables verified."
 )
 
 
@@ -90,13 +121,10 @@ app = FastAPI(
 
     description=(
         "AI-powered real-time voice "
-        "security platform detecting "
-        "synthetic voices, voice cloning, "
-        "speaker mismatch, and social "
-        "engineering attacks."
+        "security platform."
     ),
 
-    version="2.0.0-phase1",
+    version="2.1.0",
 )
 
 
@@ -108,15 +136,16 @@ configured_origins = os.getenv(
     "ALLOW_ORIGINS",
     (
         "http://localhost:3000,"
-        "http://127.0.0.1:3000"
+        "http://127.0.0.1:3000,"
+        "https://www.vigilvoice.in,"
+        "https://vigilvoice.in"
     ),
 )
 
+
 origins = [
     origin.strip()
-    for origin in (
-        configured_origins.split(",")
-    )
+    for origin in configured_origins.split(",")
     if origin.strip()
 ]
 
@@ -138,7 +167,6 @@ app.add_middleware(
 # ROOT
 # ============================================================
 
-
 @app.get("/")
 def root():
 
@@ -156,6 +184,32 @@ def root():
         "status": "ONLINE",
 
         "docs_url": "/docs",
+    }
+
+
+# ============================================================
+# HEALTH
+# ============================================================
+
+@app.get("/health")
+def health():
+
+    database_ok = check_database_connection()
+
+    return {
+        "status": (
+            "OPERATIONAL"
+            if database_ok
+            else "DEGRADED"
+        ),
+
+        "database": (
+            "CONNECTED"
+            if database_ok
+            else "ERROR"
+        ),
+
+        "system": "VIGIL",
     }
 
 
