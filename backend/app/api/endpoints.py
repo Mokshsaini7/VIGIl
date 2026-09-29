@@ -215,127 +215,171 @@ def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
+    """
+    Authenticate a VIGIL user.
 
-    user = (
-        db.query(User)
-        .filter(
-            User.username
-            == form_data.username
+    Publicly registered users must be approved by an administrator
+    before they can log in.
+    """
+
+    username = form_data.username.strip()
+
+    try:
+        # --------------------------------------------------------
+        # USER LOOKUP
+        # --------------------------------------------------------
+
+        user = (
+            db.query(User)
+            .filter(
+                User.username == username
+            )
+            .first()
         )
-        .first()
-    )
 
-    if not user or not verify_password(
-        form_data.password,
-        user.hashed_password,
-    ):
+        if not user:
+            raise HTTPException(
+                status_code=401,
+                detail="Incorrect username or password",
+                headers={
+                    "WWW-Authenticate": "Bearer"
+                },
+            )
 
-        raise HTTPException(
-            status_code=401,
-            detail="Incorrect username or password",
-            headers={
-                "WWW-Authenticate": "Bearer"
-            },
-        )
+        # --------------------------------------------------------
+        # PASSWORD VERIFICATION
+        # --------------------------------------------------------
 
-    # --------------------------------------------------------
-    # PENDING
-    # --------------------------------------------------------
+        if not verify_password(
+            form_data.password,
+            user.hashed_password,
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Incorrect username or password",
+                headers={
+                    "WWW-Authenticate": "Bearer"
+                },
+            )
 
-    if user.account_status == "PENDING":
+        # --------------------------------------------------------
+        # ACCOUNT APPROVAL / STATUS
+        # --------------------------------------------------------
+
+        if user.account_status == "PENDING":
+            record_audit(
+                db,
+                user.username,
+                "LOGIN_BLOCKED",
+                "AUTH_SERVICE",
+                "DENIED",
+                {
+                    "reason": "PENDING_APPROVAL"
+                },
+            )
+
+            raise HTTPException(
+                status_code=403,
+                detail="ACCOUNT_PENDING_APPROVAL",
+            )
+
+        if user.account_status == "REJECTED":
+            record_audit(
+                db,
+                user.username,
+                "LOGIN_BLOCKED",
+                "AUTH_SERVICE",
+                "DENIED",
+                {
+                    "reason": "REJECTED"
+                },
+            )
+
+            raise HTTPException(
+                status_code=403,
+                detail="ACCOUNT_REJECTED",
+            )
+
+        if user.account_status == "SUSPENDED":
+            record_audit(
+                db,
+                user.username,
+                "LOGIN_BLOCKED",
+                "AUTH_SERVICE",
+                "DENIED",
+                {
+                    "reason": "SUSPENDED"
+                },
+            )
+
+            raise HTTPException(
+                status_code=403,
+                detail="ACCOUNT_SUSPENDED",
+            )
+
+        if user.account_status != "ACTIVE":
+            raise HTTPException(
+                status_code=403,
+                detail="ACCOUNT_NOT_ACTIVE",
+            )
+
+        # --------------------------------------------------------
+        # UPDATE LAST LOGIN
+        # --------------------------------------------------------
+
+        user.last_login = datetime.datetime.utcnow()
+
+        db.commit()
+
+        # --------------------------------------------------------
+        # CREATE ACCESS TOKEN
+        # --------------------------------------------------------
+
+        token = create_access_token(user)
+
+        # --------------------------------------------------------
+        # AUDIT LOGIN
+        # --------------------------------------------------------
 
         record_audit(
             db,
             user.username,
-            "LOGIN_BLOCKED",
+            "USER_LOGIN",
             "AUTH_SERVICE",
-            "DENIED",
-            {
-                "reason": "PENDING_APPROVAL"
-            },
+            "SUCCESS",
+        )
+
+        # --------------------------------------------------------
+        # RESPONSE
+        # --------------------------------------------------------
+
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "username": user.username,
+            "role": user.role,
+            "account_status": user.account_status,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+        # Never expose internal database/JWT details to the client.
+        db.rollback()
+
+        print(
+            "[VIGIL LOGIN] Unexpected authentication error:",
+            repr(exc),
         )
 
         raise HTTPException(
-            status_code=403,
-            detail="ACCOUNT_PENDING_APPROVAL",
+            status_code=500,
+            detail=(
+                "Authentication service "
+                "temporarily unavailable"
+            ),
         )
-
-    # --------------------------------------------------------
-    # REJECTED
-    # --------------------------------------------------------
-
-    if user.account_status == "REJECTED":
-
-        record_audit(
-            db,
-            user.username,
-            "LOGIN_BLOCKED",
-            "AUTH_SERVICE",
-            "DENIED",
-            {
-                "reason": "REJECTED"
-            },
-        )
-
-        raise HTTPException(
-            status_code=403,
-            detail="ACCOUNT_REJECTED",
-        )
-
-    # --------------------------------------------------------
-    # SUSPENDED
-    # --------------------------------------------------------
-
-    if user.account_status == "SUSPENDED":
-
-        record_audit(
-            db,
-            user.username,
-            "LOGIN_BLOCKED",
-            "AUTH_SERVICE",
-            "DENIED",
-            {
-                "reason": "SUSPENDED"
-            },
-        )
-
-        raise HTTPException(
-            status_code=403,
-            detail="ACCOUNT_SUSPENDED",
-        )
-
-    if user.account_status != "ACTIVE":
-
-        raise HTTPException(
-            status_code=403,
-            detail="ACCOUNT_NOT_ACTIVE",
-        )
-
-    user.last_login = (
-        datetime.datetime.utcnow()
-    )
-
-    db.commit()
-
-    token = create_access_token(
-        user
-    )
-
-    record_audit(
-        db,
-        user.username,
-        "USER_LOGIN",
-        "AUTH_SERVICE",
-        "SUCCESS",
-    )
-
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "username": user.username,
-        "role": user.role,
-        "account_status": user.account_status,
-    }
 
 
 @router.get(
